@@ -986,6 +986,7 @@ int main(int argc, char **argv) {
 
     out << "l1d cache hits = " << tb->l1d_cache_hits << "\n";
     out << "l1d cache accesses = " << tb->l1d_cache_accesses << "\n";
+    out << "l1d cache conflicts = " << tb->l1d_cache_conflicts << "\n";
     out << "l1d hit rate = "
 	      << 100.0 *(static_cast<double>(tb->l1d_cache_hits) / tb->l1d_cache_accesses)
 	      << "\n";

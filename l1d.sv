@@ -48,7 +48,8 @@ module l1d(clk,
 	   mem_rsp_valid,
 	   mem_rsp_load_data,
 	   cache_accesses,
-	   cache_hits
+	   cache_hits,
+	   cache_conflicts
 	   );
 
    localparam L1D_NUM_SETS = 1 << `LG_L1D_NUM_SETS;
@@ -96,6 +97,7 @@ module l1d(clk,
    
    output logic [63:0] 			 cache_accesses;
    output logic [63:0] 			 cache_hits;
+   output logic [63:0] 			 cache_conflicts;
 
          
    localparam LG_WORDS_PER_CL = `LG_L1D_CL_LEN - 2;
@@ -130,7 +132,9 @@ module l1d(clk,
    
    //1st read port
    logic [`LG_L1D_NUM_SETS-1:0] 	  t_cache_idx, r_cache_idx, rr_cache_idx;
-   logic [N_TAG_BITS-1:0] 		  t_cache_tag, r_cache_tag, r_tag_out;
+   logic [N_TAG_BITS-1:0] 		  t_cache_tag, r_cache_tag, r_tag_out,
+					  r_mct_out, r_old_tag, n_old_tag;
+   
    logic [N_TAG_BITS-1:0] 		  rr_cache_tag;
    logic 				  r_valid_out, r_dirty_out;
    logic [L1D_CL_LEN_BITS-1:0] 		  r_array_out, t_data, t_data2;
@@ -244,6 +248,7 @@ module l1d(clk,
    logic [3:0] 		       r_mem_req_opcode, n_mem_req_opcode;
    logic [63:0] 	       n_cache_accesses, r_cache_accesses;
    logic [63:0] 	       n_cache_hits, r_cache_hits;
+   logic [63:0] 	       n_cache_conflicts, r_cache_conflicts;
    
    logic [63:0] 	       r_store_stalls, n_store_stalls;
    
@@ -260,6 +265,8 @@ module l1d(clk,
    
    assign cache_accesses = r_cache_accesses;
    assign cache_hits = r_cache_hits;
+   assign cache_conflicts = r_cache_conflicts;
+   
 
    
    always_ff@(posedge clk)
@@ -528,12 +535,14 @@ module l1d(clk,
 	     r_core_mem_rsp_valid <= 1'b0;
 	     r_cache_hits <= 'd0;
 	     r_cache_accesses <= 'd0;
+	     r_cache_conflicts <= 'd0;
 	     r_store_stalls <= 'd0;
 	     r_inhibit_write <= 1'b0;
 	     memq_empty <= 1'b1;
 	     r_q_priority <= 1'b0;
 	     r_must_forward <= 1'b0;
 	     r_must_forward2 <= 1'b0;
+	     r_old_tag <= 'd0;
 	  end
 	else
 	  begin
@@ -576,6 +585,7 @@ module l1d(clk,
 	     r_core_mem_rsp_valid <= n_core_mem_rsp_valid;
 	     r_cache_hits <= n_cache_hits;
 	     r_cache_accesses <= n_cache_accesses;
+	     r_cache_conflicts <= n_cache_conflicts;
 	     r_store_stalls <= n_store_stalls;
 	     r_inhibit_write <= n_inhibit_write;
 	     memq_empty <= mem_q_empty 
@@ -588,6 +598,7 @@ module l1d(clk,
 	     r_q_priority <= n_q_priority;
 	     r_must_forward  <= t_mh_block & t_pop_mq;
 	     r_must_forward2 <= t_cm_block & core_mem_req_ack;
+	     r_old_tag <= n_old_tag;
 	  end
      end // always_ff@ (posedge clk)
 
@@ -648,6 +659,16 @@ module l1d(clk,
       .rd_data0(r_tag_out),
       .rd_data1(r_tag_out2)
       );
+
+  ram1r1w #(.WIDTH(N_TAG_BITS), .LG_DEPTH(`LG_L1D_NUM_SETS)) dc_mct
+     (
+      .clk(clk),
+      .rd_addr(t_cache_idx),
+      .wr_addr(r_mem_req_addr[IDX_STOP-1:IDX_START]),
+      .wr_data(r_old_tag),
+      .wr_en(mem_rsp_valid),
+      .rd_data(r_mct_out)
+      );   
      
 
    ram2r1w_l1d_data #(.LG_DEPTH(`LG_L1D_NUM_SETS)) dc_data
@@ -930,6 +951,7 @@ module l1d(clk,
 	
 	n_cache_accesses = r_cache_accesses;
 	n_cache_hits = r_cache_hits;
+	n_cache_conflicts = r_cache_conflicts;
 	
 	n_store_stalls = r_store_stalls;
 	
@@ -962,6 +984,7 @@ module l1d(clk,
 
 
 	t_cm_block_stall = t_cm_block && !(r_did_reload||r_is_retry);//1'b0;
+	n_old_tag = r_old_tag;
 	
 	case(r_state)
 	  INITIALIZE:
@@ -1066,6 +1089,15 @@ module l1d(clk,
 		      begin
 			 t_got_miss = 1'b1;
 			 n_inhibit_write = 1'b1;
+
+			 if((r_valid_out ? (r_cache_tag == r_mct_out) : 1'b0))
+			   begin
+			      n_cache_conflicts = r_cache_conflicts + 64'd1;
+			      //$display("dirty valid miss : hit mct tag, mct %x, curr %x, looking for %x",
+			      //r_mct_out, r_tag_out, r_cache_tag);			      
+			   end
+
+			 
 			 if(r_hit_busy_addr && r_is_retry || !r_hit_busy_addr)
 			   begin
 			      n_mem_req_addr = {r_tag_out,r_cache_idx,{`LG_L1D_CL_LEN{1'b0}}};
@@ -1079,6 +1111,7 @@ module l1d(clk,
 			      if((rr_cache_idx == r_cache_idx) && rr_last_wr)
 				begin
 				   //$display("inflight write to line, must wait");
+				   n_old_tag = r_tag_out;
 				   t_cache_idx = r_cache_idx;
 				   n_state = WAIT_INJECT_RELOAD;
 				   n_mem_req_valid = 1'b0;				   
@@ -1086,7 +1119,7 @@ module l1d(clk,
 			      else
 				begin
 				   //$display("no wait");
-				   n_state = INJECT_RELOAD;				   
+				   n_state = INJECT_RELOAD;				   				   n_old_tag = r_tag_out;
 				   n_mem_req_valid = 1'b1;
 				end
 			   end // if (!t_stall_for_busy)
@@ -1100,8 +1133,15 @@ module l1d(clk,
 `endif
 
 		       t_got_miss = 1'b1;
-		       n_inhibit_write = 1'b0;	
+		       n_inhibit_write = 1'b0;
 
+		       if((r_valid_out ? (r_cache_tag == r_mct_out) : 1'b0))
+			 begin
+			    n_cache_conflicts = r_cache_conflicts + 64'd1;			    
+			    //$display("valid hit mct tag, mct %x, curr %x, looking for %x",
+			    //r_mct_out, r_tag_out, r_cache_tag);
+			 end
+		       
 		       if(r_hit_busy_addr && r_is_retry || !r_hit_busy_addr || r_lock_cache)
 			 begin
 			    t_miss_idx = r_cache_idx;
@@ -1116,6 +1156,8 @@ module l1d(clk,
 			    n_mem_req_opcode = MEM_SW;
 			    n_state = WAIT_INJECT_RELOAD;
 			    n_mem_req_valid = 1'b0;
+			    n_old_tag = r_tag_out;
+			    
 			      end                                                             
 			    else
 			      begin
@@ -1124,6 +1166,7 @@ module l1d(clk,
 				 n_mem_req_opcode = MEM_LW;				 
 				 n_state = INJECT_RELOAD;
 				 n_mem_req_valid = 1'b1;
+				 n_old_tag = r_tag_out;
 			      end
 			 end // if (!t_stall_for_busy)
 		    end // else: !if(r_valid_out && r_dirty_out && (r_tag_out != r_cache_tag)...

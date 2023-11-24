@@ -34,6 +34,7 @@ module core_l1d_l1i(clk,
 		    l1i_cache_hits,
 		    l1d_cache_accesses,
 		    l1d_cache_hits,
+		    l1d_cache_conflicts,
 		    l2_cache_accesses,
 		    l2_cache_hits,
 		    monitor_ack,
@@ -79,6 +80,7 @@ module core_l1d_l1i(clk,
    output logic [63:0] 			l1i_cache_hits;
    output logic [63:0] 			l1d_cache_accesses;
    output logic [63:0] 			l1d_cache_hits;
+   output logic [63:0] 			l1d_cache_conflicts;   
    output logic [63:0] 			l2_cache_accesses;
    output logic [63:0] 			l2_cache_hits;   
 
@@ -370,10 +372,11 @@ module core_l1d_l1i(clk,
 	       .mem_rsp_valid(l1d_mem_rsp_valid),
 	       .mem_rsp_load_data(w_l1_mem_load_data),
 
-	       .cache_accesses(l1d_cache_accesses),
-	       .cache_hits(l1d_cache_hits)
-	       );
-
+	     .cache_accesses(l1d_cache_accesses),
+	     .cache_hits(l1d_cache_hits),
+	     .cache_conflicts(l1d_cache_conflicts)
+	     );
+   
    l1i icache(
 	      .clk(clk),
 	      .reset(reset),
