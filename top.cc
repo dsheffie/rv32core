@@ -371,7 +371,7 @@ int main(int argc, char **argv) {
   std::string pushout_name = "pushout.txt";
   std::string branch_name = "branch_info.txt";
   bool use_fb = false;
-  uint64_t heartbeat = 1UL<<36, start_trace_at = ~0UL;
+  uint64_t heartbeat = 1UL<<36, sample_cnt = 1UL, start_trace_at = ~0UL;
   uint64_t max_cycle = 0, max_icnt = 0, mem_lat = 2;
   uint64_t last_store_addr = 0, last_load_addr = 0, last_addr = 0;
   int misses_inflight = 0;
@@ -397,6 +397,7 @@ int main(int argc, char **argv) {
       ("maxicnt", po::value<uint64_t>(&max_icnt)->default_value(1UL<<50), "maximum icnt")
       ("trace,t", po::value<bool>(&trace_retirement)->default_value(false), "trace retired instruction stream")
       ("starttrace,s", po::value<uint64_t>(&start_trace_at)->default_value(~0UL), "start tracing retired instructions")
+      ("sample_cnt", po::value<uint64_t>(&sample_cnt)->default_value(1UL<<40), "sample freq")
       ("fb", po::value<bool>(&use_fb)->default_value(false), "use an SDL framebuffer")
       ; 
     po::variables_map vm;
@@ -442,6 +443,7 @@ int main(int argc, char **argv) {
   std::unique_ptr<Vcore_l1d_l1i> tb(new Vcore_l1d_l1i);
   uint32_t last_match_pc = 0;
   uint64_t last_retire = 0, last_check = 0, last_restart = 0;
+  uint64_t last_insn_cnt = 0, last_cycle_cnt = 0;
   uint64_t last_retired_pc = 0, last_retired_fp_pc = 0;
   uint64_t mismatches = 0, n_stores = 0, n_loads = 0;
   uint64_t n_branches = 0, n_mispredicts = 0, n_checks = 0, n_flush_cycles = 0;
@@ -596,6 +598,11 @@ int main(int argc, char **argv) {
   }
   
   s->pc = ss->pc;
+
+  std::ofstream sample_log;
+  if(sample_cnt != (1UL<<40)) {
+    sample_log.open("samples.csv");
+  }
   
   double t0 = timestamp();
   while(!Verilated::gotFinish() && (cycle < max_cycle) && (insns_retired < max_icnt)) {
@@ -710,6 +717,16 @@ int main(int argc, char **argv) {
 		    <<" \n";
 	}
       }
+
+      if((insns_retired % sample_cnt) == 0) {
+	uint64_t icnt_delta = insns_retired - last_insn_cnt;
+	uint64_t cycle_delta = cycle - last_cycle_cnt;
+	double cpi = static_cast<double>(cycle_delta) / icnt_delta;
+	sample_log << cpi << "\n";
+	last_insn_cnt = insns_retired;
+	last_cycle_cnt = cycle;
+      }
+      
       if(tb->got_bad_addr) {
 	std::cout << "fatal - unaligned address\n";
 	break;
@@ -959,6 +976,10 @@ int main(int argc, char **argv) {
   }
   tb->final();
   t0 = timestamp() - t0;
+
+  if(sample_log.is_open()) {
+    sample_log.close();
+  }
 
   
   if(!incorrect) {
