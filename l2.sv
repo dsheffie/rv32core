@@ -3,6 +3,13 @@
 module l2(clk,
 	  reset,
 
+	  miss_req_val,
+	  miss_req,
+	  miss_req_ack,
+
+	  miss_rsp_val,
+	  miss_rsp,
+	  
 	  l1d_req,
 	  l1i_req,
 
@@ -44,6 +51,15 @@ module l2(clk,
 
    input logic clk;
    input logic reset;
+
+   input logic	miss_req_val;
+   input	miss_req_t  miss_req;
+   output logic	miss_req_ack;
+
+   output logic	miss_rsp_val;
+   output	miss_rsp_t miss_rsp;
+   
+   
    input logic l1d_req;
    input logic l1i_req;
    input logic [(`M_WIDTH-1):0] l1d_addr;
@@ -153,6 +169,44 @@ module l2(clk,
    
    assign cache_hits = r_cache_hits;
    assign cache_accesses = r_cache_accesses;
+   
+   always_comb
+     begin
+	miss_req_ack = miss_req_val;
+
+     end
+   
+   always_ff@(posedge clk)
+     begin
+	if(reset)
+	  begin
+	     miss_rsp_val <= 1'b0;
+	  end
+	else
+	  begin
+	     miss_rsp_val <= miss_req_val;
+	  end
+     end // always_ff@ (posedge clk)
+
+   logic [63:0] r_cycle;
+   always_ff@(posedge clk)
+     begin
+	miss_rsp.rob_ptr <= miss_req.rob_ptr;
+	miss_rsp.data <= 'd0;
+	r_cycle <= reset ?  'd0 : r_cycle + 'd1;
+     end
+
+   
+
+   
+   always_ff@(negedge clk)
+     begin
+	if(miss_req_val)
+	  begin
+	     $display("l2 gets request for addrsss %x at cycle %d", miss_req.addr, r_cycle);
+	     
+	  end
+     end
    
      
    logic [127:0] 	t_d0;

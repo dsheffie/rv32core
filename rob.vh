@@ -66,6 +66,19 @@ typedef struct packed {
    logic [`M_WIDTH-1:0]        pc;
 } mem_req_t;
 
+
+typedef struct packed {
+   logic [`M_WIDTH-1:0]	addr;
+   logic [`LG_ROB_ENTRIES-1:0] rob_ptr;
+} miss_req_t;
+
+
+typedef struct packed {
+   logic [(1 << (`LG_L1D_CL_LEN+3)) - 1 :0] data;
+   logic [`LG_ROB_ENTRIES-1:0] rob_ptr;
+} miss_rsp_t;
+
+
 typedef struct packed {
    logic [`LG_ROB_ENTRIES-1:0] rob_ptr;
    logic [`LG_PRF_ENTRIES-1:0] src_ptr;

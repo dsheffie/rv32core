@@ -287,11 +287,26 @@ module core_l1d_l1i(clk,
    
    wire [127:0] w_l1_mem_load_data;
    wire		w_mode64;
+
+   wire		w_l1l2_val;
+   wire		w_l2l1_ack;
+   
+   miss_req_t l1l2_miss;
+   miss_rsp_t l2l1_rsp;
+   wire		w_l2l1_val;
+   
    
    l2 l2cache (
 	       .clk(clk),
 	       .reset(reset),
 
+	     .miss_req_val(w_l1l2_val),
+	     .miss_req(l1l2_miss),
+	     .miss_req_ack(w_l2l1_ack),
+
+	       .miss_rsp_val(w_l2l1_val),
+	       .miss_rsp(l2l1_rsp),
+	       
 	       .l1d_req(l1d_mem_req_valid),
 	       .l1i_req(l1i_mem_req_valid),
 	       .l1d_addr(l1d_mem_req_addr),
@@ -336,44 +351,49 @@ module core_l1d_l1i(clk,
      l1d
 `endif
      dcache (
-	       .clk(clk),
-	       .reset(reset),
-	       .head_of_rob_ptr_valid(head_of_rob_ptr_valid),
-	       .head_of_rob_ptr(head_of_rob_ptr),
-	       .retired_rob_ptr_valid(retired_rob_ptr_valid),
-	       .retired_rob_ptr_two_valid(retired_rob_ptr_two_valid),
-	       .retired_rob_ptr(retired_rob_ptr),
-	       .retired_rob_ptr_two(retired_rob_ptr_two),
-	       .restart_valid(restart_valid),
-	       .memq_empty(memq_empty),
-	       .drain_ds_complete(drain_ds_complete),
-	       .dead_rob_mask(dead_rob_mask),
-	       .flush_req(flush_req_l1d),
-	       .flush_cl_req(flush_cl_req),
-	       .flush_cl_addr(flush_cl_addr),
-	       .flush_complete(l1d_flush_complete),
-	       .core_mem_req_valid(core_mem_req_valid),
-	       .core_mem_req(core_mem_req),
-	       .core_mem_req_ack(core_mem_req_ack),
-
-	       .core_store_data_valid(core_store_data_valid),
-	       .core_store_data(core_store_data),
-	       .core_store_data_ack(core_store_data_ack),
-	       
-	       .core_mem_rsp_valid(core_mem_rsp_valid),
-	       .core_mem_rsp(core_mem_rsp),
-
-	       .mem_req_valid(l1d_mem_req_valid),
-	       .mem_req_addr(l1d_mem_req_addr),
-	       .mem_req_store_data(l1d_mem_req_store_data),
-	       .mem_req_opcode(l1d_mem_req_opcode),
-	       
-	       .mem_rsp_valid(l1d_mem_rsp_valid),
-	       .mem_rsp_load_data(w_l1_mem_load_data),
-
-	       .cache_accesses(l1d_cache_accesses),
-	       .cache_hits(l1d_cache_hits)
-	       );
+	     .clk(clk),
+	     .reset(reset),
+	     .head_of_rob_ptr_valid(head_of_rob_ptr_valid),
+	     .head_of_rob_ptr(head_of_rob_ptr),
+	     .retired_rob_ptr_valid(retired_rob_ptr_valid),
+	     .retired_rob_ptr_two_valid(retired_rob_ptr_two_valid),
+	     .retired_rob_ptr(retired_rob_ptr),
+	     .retired_rob_ptr_two(retired_rob_ptr_two),
+	     .restart_valid(restart_valid),
+	     .memq_empty(memq_empty),
+	     .drain_ds_complete(drain_ds_complete),
+	     .dead_rob_mask(dead_rob_mask),
+	     .flush_req(flush_req_l1d),
+	     .flush_cl_req(flush_cl_req),
+	     .flush_cl_addr(flush_cl_addr),
+	     .flush_complete(l1d_flush_complete),
+	     .core_mem_req_valid(core_mem_req_valid),
+	     .core_mem_req(core_mem_req),
+	     .core_mem_req_ack(core_mem_req_ack),
+	     
+	     .core_store_data_valid(core_store_data_valid),
+	     .core_store_data(core_store_data),
+	     .core_store_data_ack(core_store_data_ack),
+	     
+	     .core_mem_rsp_valid(core_mem_rsp_valid),
+	     .core_mem_rsp(core_mem_rsp),
+	     
+	     .mem_req_valid(l1d_mem_req_valid),
+	     .mem_req_addr(l1d_mem_req_addr),
+	     .mem_req_store_data(l1d_mem_req_store_data),
+	     .mem_req_opcode(l1d_mem_req_opcode),
+	     
+	     .miss_req_val(w_l1l2_val),
+	     .miss_req(l1l2_miss),
+	     .miss_req_ack(w_l2l1_ack),
+	     .miss_rsp_val(w_l2l1_val),
+	     .miss_rsp(l2l1_rsp),
+	     .mem_rsp_valid(l1d_mem_rsp_valid),
+	     .mem_rsp_load_data(w_l1_mem_load_data),
+	     
+	     .cache_accesses(l1d_cache_accesses),
+	     .cache_hits(l1d_cache_hits)
+	     );
 
    l1i icache(
 	      .clk(clk),

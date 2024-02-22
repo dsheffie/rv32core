@@ -1704,9 +1704,7 @@ module exec(clk,
    logic t_blocked_by_store;
    always_comb
      begin
-	t_blocked_by_store = t_mem_uq_empty ? 1'b0 : !t_pop_mem_uq  & is_store(mem_uq.op) & 
-			     !r_prf_inflight[mem_uq.srcA] &
-			     !mem_q_full;
+	t_blocked_by_store = 1'b0;
      end
    always_ff@(negedge clk)
      begin

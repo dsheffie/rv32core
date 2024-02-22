@@ -49,6 +49,14 @@ module l1d(clk,
 	   mem_req_addr, 
 	   mem_req_store_data, 
 	   mem_req_opcode,
+	   //decoupled requests
+	   miss_req_val,
+	   miss_req,
+	   miss_req_ack,
+	   //replies
+	   miss_rsp_val,
+	   miss_rsp,
+	   
 	   //reply from memory system
 	   mem_rsp_valid,
 	   mem_rsp_load_data,
@@ -98,6 +106,13 @@ module l1d(clk,
    input logic 				  mem_rsp_valid;
    input logic [L1D_CL_LEN_BITS-1:0] 	  mem_rsp_load_data;
 
+   output logic				  miss_req_val;
+   output				  miss_req_t  miss_req;
+   input logic				  miss_req_ack;
+
+   input logic				  miss_rsp_val;
+   input				  miss_rsp_t miss_rsp;
+   
    
    output logic [63:0] 			 cache_accesses;
    output logic [63:0] 			 cache_hits;
@@ -188,6 +203,7 @@ module l1d(clk,
    logic 				  t_got_req, t_got_req2;
    logic 				  t_got_miss;
    logic 				  t_push_miss;
+   logic				  t_push_miss_req;
    
    logic 				  t_mh_block, t_cm_block, t_cm_block2,
 					  t_cm_block_stall;
@@ -210,8 +226,20 @@ module l1d(clk,
    mem_req_t n_req2, r_req2;
 
    mem_req_t r_mem_q[N_MQ_ENTRIES-1:0];
+
+   
    logic [`LG_MRQ_ENTRIES:0] r_mq_head_ptr, n_mq_head_ptr;
    logic [`LG_MRQ_ENTRIES:0] r_mq_tail_ptr, n_mq_tail_ptr;
+
+   logic [`LG_MRQ_ENTRIES:0] r_l1l2q_head_ptr, n_l1l2q_head_ptr;
+   logic [`LG_MRQ_ENTRIES:0] r_l1l2q_tail_ptr, n_l1l2q_tail_ptr;
+   logic		     l1l2q_empty;
+
+   logic [`LG_MRQ_ENTRIES:0] r_l2l1q_head_ptr, n_l2l1q_head_ptr;
+   logic [`LG_MRQ_ENTRIES:0] r_l2l1q_tail_ptr, n_l2l1q_tail_ptr;
+   logic		     l2l1q_empty;
+
+   
    logic [`LG_MRQ_ENTRIES:0] t_mq_tail_ptr_plus_one;
 
    
@@ -222,6 +250,9 @@ module l1d(clk,
    logic 			  r_mq_is_unaligned[N_MQ_ENTRIES-1:0];
 
    mem_op_t r_mq_op[N_MQ_ENTRIES-1:0];
+   miss_req_t r_l1l2_q[N_MQ_ENTRIES-1:0];
+   miss_rsp_t r_l2l1_q[N_MQ_ENTRIES-1:0];   
+   miss_rsp_t l2l1_head;
    
    logic [`M_WIDTH-3:0] 	  r_mq_word_addr[N_MQ_ENTRIES-1:0];
    wire [BYTES_PER_CL-1:0] 	  w_store_byte_en;  
@@ -286,17 +317,27 @@ module l1d(clk,
 	  begin
 	     r_mq_head_ptr <= 'd0;
 	     r_mq_tail_ptr <= 'd0;
+	     r_l1l2q_head_ptr <= 'd0;
+	     r_l1l2q_tail_ptr <= 'd0;
+	     r_l2l1q_head_ptr <= 'd0;
+	     r_l2l1q_tail_ptr <= 'd0;	     
 	  end
 	else
 	  begin
 	     r_mq_head_ptr <= n_mq_head_ptr;
 	     r_mq_tail_ptr <= n_mq_tail_ptr;
+	     r_l1l2q_head_ptr <= n_l1l2q_head_ptr;
+	     r_l1l2q_tail_ptr <= n_l1l2q_tail_ptr;
+	     r_l2l1q_head_ptr <= n_l2l1q_head_ptr;
+	     r_l2l1q_tail_ptr <= n_l2l1q_tail_ptr;	     	     
 	  end
      end // always_ff@ (posedge clk)
 
    localparam N_ROB_ENTRIES = (1<<`LG_ROB_ENTRIES);
    logic [1:0] r_graduated [N_ROB_ENTRIES-1:0];
    logic [N_ROB_ENTRIES-1:0] r_rob_inflight;
+
+   logic [(1<<`LG_ROB_ENTRIES)-1:0] r_l2reqs ;
    
    
    logic t_reset_graduated;
@@ -352,6 +393,70 @@ module l1d(clk,
 	else if(!(core_mem_req_valid && core_mem_req_ack) && core_mem_rsp_valid)
 	  begin
 	     r_n_inflight <= r_n_inflight - 'd1;
+	  end
+     end // always_ff@ (posedge clk)
+   
+
+   always_comb
+     begin
+	n_l1l2q_head_ptr = r_l1l2q_head_ptr;
+	n_l1l2q_tail_ptr = r_l1l2q_tail_ptr;
+	if(t_push_miss_req)
+	  begin
+	     n_l1l2q_tail_ptr = r_l1l2q_tail_ptr + 'd1;
+	  end
+	if(miss_req_ack)
+	  begin
+	     n_l1l2q_head_ptr = r_l1l2q_head_ptr + 'd1;
+	  end
+	l1l2q_empty = (r_l1l2q_head_ptr == r_l1l2q_tail_ptr);
+	miss_req_val = (r_l1l2q_head_ptr != r_l1l2q_tail_ptr);
+	miss_req = r_l1l2_q[r_l1l2q_head_ptr[`LG_MRQ_ENTRIES-1:0]];
+     end // always_comb
+
+   logic t_clear_l2reqs;
+   
+   always_comb
+     begin
+	n_l2l1q_head_ptr = r_l2l1q_head_ptr;
+	n_l2l1q_tail_ptr = r_l2l1q_tail_ptr;
+	if(miss_rsp_val)
+	  begin
+	     n_l2l1q_tail_ptr = r_l2l1q_tail_ptr + 'd1;
+	  end
+	if(t_clear_l2reqs)
+	  begin
+	     n_l2l1q_head_ptr = r_l2l1q_head_ptr + 'd1;
+	  end
+	l2l1q_empty = (r_l2l1q_head_ptr == r_l2l1q_tail_ptr);
+	l2l1_head = r_l2l1_q[r_l2l1q_head_ptr[`LG_MRQ_ENTRIES-1:0]];
+     end // always_comb
+
+   always_ff@(posedge clk)
+     begin
+	if(miss_rsp_val)
+	  begin
+	     r_l2l1_q[r_l2l1q_tail_ptr[`LG_MRQ_ENTRIES-1:0]] <= miss_rsp;
+	  end
+     end
+   
+   
+   always_ff@(posedge clk)
+     begin
+	if(reset)
+	  begin
+	     r_l2reqs <= 'd0;
+	  end
+	else
+	  begin
+	     if(t_push_miss_req)
+	       begin
+		  r_l2reqs[r_req2.rob_ptr] <= 1'b1;
+	       end
+	     if(t_clear_l2reqs)
+	       begin
+		  r_l2reqs[l2l1_head.rob_ptr] <= 1'b0;
+	       end
 	  end
      end // always_ff@ (posedge clk)
    
@@ -431,6 +536,16 @@ module l1d(clk,
    // 		      r_req2.is_store);
    // 	  end
    //   end
+
+   always_ff@(posedge clk)
+     begin
+	if(t_push_miss_req)
+	  begin
+	     r_l1l2_q[r_l1l2q_tail_ptr[`LG_MRQ_ENTRIES-1:0]].addr <= r_req2.addr;
+	     r_l1l2_q[r_l1l2q_tail_ptr[`LG_MRQ_ENTRIES-1:0]].rob_ptr <= r_req2.rob_ptr;
+	     
+	  end
+     end
    
    always_ff@(posedge clk)
      begin
@@ -471,6 +586,9 @@ module l1d(clk,
    logic 		   r_hit_busy_addr;
    
    wire [N_MQ_ENTRIES-1:0] w_hit_busy_addrs2;
+  
+   wire [N_MQ_ENTRIES-1:0] w_hit_inflight_addrs2;
+   
    wire [N_MQ_ENTRIES-1:0] w_hit_busy_full_addrs2;
    logic [N_MQ_ENTRIES-1:0] r_hit_busy_full_addrs2;
    
@@ -479,7 +597,8 @@ module l1d(clk,
 
    logic [N_MQ_ENTRIES-1:0] r_hit_busy_addrs2;
    logic 		   r_hit_busy_addr2, r_hit_busy_word_addr2;
-
+   logic		   r_hit_inflight_addr2;
+   
    wire [N_MQ_ENTRIES-1:0] w_unaligned_in_mq;
    logic 		   r_any_unaligned;
    
@@ -490,8 +609,11 @@ module l1d(clk,
 					r_mq_addr_valid[i] ? r_mq_addr[i] == t_cache_idx : 
 					1'b0;
 	   
-	   assign w_hit_busy_addrs2[i] = r_mq_addr_valid[i] ? (core_mem_req.is_load && r_mq_is_load[i]) ? 1'b0 : r_mq_addr[i] == t_cache_idx2 : 1'b0;
-
+	   assign w_hit_busy_addrs2[i] = r_mq_addr_valid[i] ? (core_mem_req.is_load && r_mq_is_load[i]) ? 1'b0 : 
+					 r_mq_addr[i] == t_cache_idx2 : 1'b0;
+	   
+	   assign w_hit_inflight_addrs2[i] = r_mq_addr_valid[i] ? r_mq_addr[i] == t_cache_idx2 : 1'b0;
+	   
 	   assign w_hit_busy_full_addrs2[i] = r_mq_addr_valid[i] ? (r_mq_full_addr[i] ==  core_mem_req.addr) : 1'b0;
 	   
 	   assign w_hit_busy_word_addrs2[i] = r_mq_addr_valid[i] ? (r_mq_word_addr[i] ==  core_mem_req.addr[`M_WIDTH-1:2]) : 1'b0;
@@ -507,8 +629,11 @@ module l1d(clk,
 	r_hit_busy_addrs <= t_got_req ? w_hit_busy_addrs : {{N_MQ_ENTRIES{1'b1}}};
 	
 	r_hit_busy_addr2 <= reset ? 1'b0 : |w_hit_busy_addrs2;
+	r_hit_inflight_addr2 <= reset ? 1'b0 : |w_hit_inflight_addrs2;
+	
 	r_hit_busy_addrs2 <= t_got_req2 ? w_hit_busy_addrs2 : {{N_MQ_ENTRIES{1'b1}}};
-
+	
+	
 	r_hit_busy_word_addr2 <= reset ? 1'b0 : |w_hit_busy_word_addrs2;
 	
 	r_hit_busy_full_addrs2 <= t_got_req2 ? w_hit_busy_full_addrs2 : {{N_MQ_ENTRIES{1'b1}}};
@@ -973,6 +1098,7 @@ module l1d(clk,
 	
 	t_got_miss = 1'b0;
 	t_push_miss = 1'b0;
+	t_push_miss_req = 1'b0;
 	
 	n_req = r_req;
 	n_req2 = r_req2;
@@ -1010,7 +1136,7 @@ module l1d(clk,
 	n_is_retry = 1'b0;
 	t_reset_graduated = 1'b0;
 	t_force_clear_busy = 1'b0;
-	
+	t_clear_l2reqs = 1'b0;
 	t_incr_busy = 1'b0;
 	
 	n_stall_store = 1'b0;
@@ -1097,6 +1223,8 @@ module l1d(clk,
 		    else
 		      begin
 			 t_push_miss = 1'b1;
+			 t_push_miss_req = !r_hit_inflight_addr2 && (t_cache_idx != r_cache_idx);
+			 
 			 if(t_port2_hit_cache)
 			   begin
 			      n_cache_hits = r_cache_hits + 'd1;
@@ -1238,6 +1366,19 @@ module l1d(clk,
 				 t_force_clear_busy = 1'b1;
 			      end
 			 end // if (t_mem_head.is_store)
+		       else if(r_l2reqs[t_mem_head.rob_ptr])
+			 begin
+			    // $display("l21q empty = %b, rob pointer on queue %d, head rob ptr %d", 
+			    // 	     l2l1q_empty, l2l1_head.rob_ptr, t_mem_head.rob_ptr);
+			    
+			    if(l2l1q_empty ? 1'b0 : (l2l1_head.rob_ptr == t_mem_head.rob_ptr))
+			      begin
+				 t_clear_l2reqs = 1'b1;
+				 $display("rob ptr matches");
+				 //$stop();
+			      end
+			     
+			 end
 		       else
 			 begin
 			    t_pop_mq = 1'b1;
@@ -1245,10 +1386,14 @@ module l1d(clk,
 			    t_cache_idx = t_mem_head.addr[IDX_STOP-1:IDX_START];
 			    t_cache_tag = t_mem_head.addr[`M_WIDTH-1:IDX_STOP];
 			    t_addr = t_mem_head.addr;
+			    
 			    t_got_req = 1'b1;
 			    n_is_retry = 1'b1;
 			    n_last_rd = 1'b1;
 			    t_got_rd_retry = 1'b1;
+
+
+			    
 			    
 `ifdef VERBOSE_L1D			    
 			    $display("firing load for %x at cycle %d for rob ptr %d, state = %d", 
