@@ -245,16 +245,13 @@ module l1d(clk,
    
    logic [N_MQ_ENTRIES-1:0] r_mq_addr_valid;
    logic [IDX_STOP-IDX_START-1:0] r_mq_addr[N_MQ_ENTRIES-1:0];
-   logic [`M_WIDTH-1:0] 	  r_mq_full_addr[N_MQ_ENTRIES-1:0];
    logic 			  r_mq_is_load[N_MQ_ENTRIES-1:0];
-   logic 			  r_mq_is_unaligned[N_MQ_ENTRIES-1:0];
 
    mem_op_t r_mq_op[N_MQ_ENTRIES-1:0];
    miss_req_t r_l1l2_q[N_MQ_ENTRIES-1:0];
    miss_rsp_t r_l2l1_q[N_MQ_ENTRIES-1:0];   
    miss_rsp_t l2l1_head;
    
-   logic [`M_WIDTH-3:0] 	  r_mq_word_addr[N_MQ_ENTRIES-1:0];
    wire [BYTES_PER_CL-1:0] 	  w_store_byte_en;  
    
    mem_req_t t_mem_tail, t_mem_head;
@@ -555,10 +552,7 @@ module l1d(clk,
 	     r_mq_addr[r_mq_tail_ptr[`LG_MRQ_ENTRIES-1:0]] <= r_req2.addr[IDX_STOP-1:IDX_START];
 	     r_mq_op[r_mq_tail_ptr[`LG_MRQ_ENTRIES-1:0]] <= r_req2.op;
 	     r_mq_is_load[r_mq_tail_ptr[`LG_MRQ_ENTRIES-1:0]] <= r_req2.is_load;
-	     r_mq_is_unaligned[r_mq_tail_ptr[`LG_MRQ_ENTRIES-1:0]] <= r_req2.unaligned;
 	     
-	     r_mq_full_addr[r_mq_tail_ptr[`LG_MRQ_ENTRIES-1:0]] <= r_req2.addr;
-	     r_mq_word_addr[r_mq_tail_ptr[`LG_MRQ_ENTRIES-1:0]] <= r_req2.addr[`M_WIDTH-1:2];
 	  end
      end
 
@@ -589,18 +583,11 @@ module l1d(clk,
   
    wire [N_MQ_ENTRIES-1:0] w_hit_inflight_addrs2;
    
-   wire [N_MQ_ENTRIES-1:0] w_hit_busy_full_addrs2;
-   logic [N_MQ_ENTRIES-1:0] r_hit_busy_full_addrs2;
-   
-   wire [N_MQ_ENTRIES-1:0] w_hit_busy_word_addrs2;
-   logic [N_MQ_ENTRIES-1:0] r_hit_busy_word_addrs2;
 
    logic [N_MQ_ENTRIES-1:0] r_hit_busy_addrs2;
-   logic 		   r_hit_busy_addr2, r_hit_busy_word_addr2;
+   logic 		   r_hit_busy_addr2;
    logic		   r_hit_inflight_addr2;
    
-   wire [N_MQ_ENTRIES-1:0] w_unaligned_in_mq;
-   logic 		   r_any_unaligned;
    
    generate
       for(genvar i = 0; i < N_MQ_ENTRIES; i=i+1)
@@ -613,12 +600,6 @@ module l1d(clk,
 					 r_mq_addr[i] == t_cache_idx2 : 1'b0;
 	   
 	   assign w_hit_inflight_addrs2[i] = r_mq_addr_valid[i] ? r_mq_addr[i] == t_cache_idx2 : 1'b0;
-	   
-	   assign w_hit_busy_full_addrs2[i] = r_mq_addr_valid[i] ? (r_mq_full_addr[i] ==  core_mem_req.addr) : 1'b0;
-	   
-	   assign w_hit_busy_word_addrs2[i] = r_mq_addr_valid[i] ? (r_mq_word_addr[i] ==  core_mem_req.addr[`M_WIDTH-1:2]) : 1'b0;
-
-	   assign w_unaligned_in_mq[i] = r_mq_addr_valid[i] ? r_mq_is_unaligned[i] : 1'b0;
 	end
    endgenerate
    
@@ -632,14 +613,6 @@ module l1d(clk,
 	r_hit_inflight_addr2 <= reset ? 1'b0 : |w_hit_inflight_addrs2;
 	
 	r_hit_busy_addrs2 <= t_got_req2 ? w_hit_busy_addrs2 : {{N_MQ_ENTRIES{1'b1}}};
-	
-	
-	r_hit_busy_word_addr2 <= reset ? 1'b0 : |w_hit_busy_word_addrs2;
-	
-	r_hit_busy_full_addrs2 <= t_got_req2 ? w_hit_busy_full_addrs2 : {{N_MQ_ENTRIES{1'b1}}};
-	r_hit_busy_word_addrs2 <= t_got_req2 ? w_hit_busy_word_addrs2 : {{N_MQ_ENTRIES{1'b1}}};
-
-	r_any_unaligned <= reset ? 1'b0 : (|w_unaligned_in_mq) | core_mem_req.unaligned;
      end // always_ff@ (posedge clk)
 
 
@@ -1209,7 +1182,7 @@ module l1d(clk,
 			 n_core_mem_rsp_valid = 1'b1;
 			 n_core_mem_rsp.bad_addr = r_req2.spans_cacheline;
 		      end // if (r_req2.is_store)
-		    else if(t_port2_hit_cache && (!r_hit_busy_addr2 || (1'b0 & r_req2.op == MEM_LW && !r_hit_busy_word_addr2 && !r_any_unaligned )) )
+		    else if(t_port2_hit_cache && !r_hit_busy_addr2)
 		      begin
 `ifdef VERBOSE_L1D
 			 $display("cycle %d port2 hit for addr %x, data %x", r_cycle, r_req2.addr, t_rsp_data2);
@@ -1223,8 +1196,12 @@ module l1d(clk,
 		    else
 		      begin
 			 t_push_miss = 1'b1;
-			 t_push_miss_req = !r_hit_inflight_addr2 && (t_cache_idx != r_cache_idx);
-			 
+			 t_push_miss_req = !(r_hit_inflight_addr2 || (t_cache_idx == r_cache_idx));
+			 //if(!t_push_miss_req)
+			 //begin
+			 //$display("cycle %d can't push %x, inflight %b, last %b", 
+			 //r_cycle, r_req2.addr, r_hit_inflight_addr2, t_cache_idx == r_cache_idx);
+			 //end
 			 if(t_port2_hit_cache)
 			   begin
 			      n_cache_hits = r_cache_hits + 'd1;
