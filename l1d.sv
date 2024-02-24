@@ -582,7 +582,7 @@ module l1d(clk,
    wire [N_MQ_ENTRIES-1:0] w_hit_busy_addrs2;
   
    wire [N_MQ_ENTRIES-1:0] w_hit_inflight_addrs2;
-   
+   logic [N_MQ_ENTRIES-1:0] r_hit_inflight_addrs2;
 
    logic [N_MQ_ENTRIES-1:0] r_hit_busy_addrs2;
    logic 		   r_hit_busy_addr2;
@@ -605,14 +605,16 @@ module l1d(clk,
    
 
    always_ff@(posedge clk)
-     begin
-	r_hit_busy_addr <= reset ? 1'b0 : |w_hit_busy_addrs;
-	r_hit_busy_addrs <= t_got_req ? w_hit_busy_addrs : {{N_MQ_ENTRIES{1'b1}}};
-	
-	r_hit_busy_addr2 <= reset ? 1'b0 : |w_hit_busy_addrs2;
-	r_hit_inflight_addr2 <= reset ? 1'b0 : |w_hit_inflight_addrs2;
-	
-	r_hit_busy_addrs2 <= t_got_req2 ? w_hit_busy_addrs2 : {{N_MQ_ENTRIES{1'b1}}};
+	  begin
+	  r_hit_busy_addr <= reset ? 1'b0 : |w_hit_busy_addrs;
+	  r_hit_busy_addrs <= t_got_req ? w_hit_busy_addrs : {{N_MQ_ENTRIES{1'b1}}};
+	  
+	  r_hit_busy_addr2 <= reset ? 1'b0 : |w_hit_busy_addrs2;
+	  r_hit_inflight_addr2 <= reset ? 1'b0 : |w_hit_inflight_addrs2;
+	  
+	  r_hit_busy_addrs2 <= t_got_req2 ? w_hit_busy_addrs2 : {{N_MQ_ENTRIES{1'b1}}};
+	  
+	  r_hit_inflight_addrs2 <= w_hit_inflight_addrs2;
      end // always_ff@ (posedge clk)
 
 
@@ -888,6 +890,7 @@ module l1d(clk,
 
 
  
+   logic t_push_miss_req_cand;
    
    
    always_comb
@@ -1051,8 +1054,12 @@ module l1d(clk,
 	r_fwd_cnt <= reset ? 'd0 : (r_got_req && r_must_forward ? r_fwd_cnt + 'd1 : r_fwd_cnt);
      end
 
+   wire w_port2_same_line = ((r_cache_idx2 == rr_cache_idx2)&&rr_got_req2);
+   
+   
    always_comb
      begin
+	t_push_miss_req_cand = 1'b0;	
 	t_ack_ld_early = 1'b0;
 	t_got_rd_retry = 1'b0;
 	t_port2_hit_cache = r_valid_out2 && (r_tag_out2 == r_cache_tag2);
@@ -1202,7 +1209,8 @@ module l1d(clk,
 		    else
 		      begin
 			 t_push_miss = 1'b1;
-			 t_push_miss_req = !(t_port2_hit_cache || r_hit_inflight_addr2 || ((r_cache_idx2 == rr_cache_idx2)&&rr_got_req2));
+			 t_push_miss_req = !(t_port2_hit_cache || r_hit_inflight_addr2 || w_port2_same_line);
+			 t_push_miss_req_cand = !t_port2_hit_cache;
 			 
 			 if(t_port2_hit_cache)
 			   begin
@@ -1557,14 +1565,19 @@ module l1d(clk,
 	     $display("cycle %d l1->l2 miss req for %x", 
 		      r_cycle, r_req2.addr);
 	  end
-
-	if(t_push_miss& !t_port2_hit_cache)
+	else if(t_push_miss_req_cand)
 	  begin
-	     $display("l1 miss but not pushing l1->l2 queue for address %x",
-		      r_req2.addr);
+	     //w_port2_same_line
+	     $display("l1 miss but not pushing l1->l2 queue for address %x : hit cache %b, inflight %b, match last %b, inflight %b",
+		      r_req2.addr,
+		      t_port2_hit_cache,
+		      r_hit_inflight_addrs2,
+		      w_port2_same_line,
+		      r_hit_inflight_addr2
+		      );
 	  end
 	    
-
+	
 	
       if(t_push_miss && mem_q_full)
 	begin
