@@ -186,29 +186,33 @@ module l2(clk,
    
    always_ff@(posedge clk)
      begin
-	miss_rsp_val <= reset ? 1'b0 : r_miss_rsp_val;
+
      end // always_ff@ (posedge clk)
 
    logic [63:0] r_cycle;
    always_ff@(posedge clk)
      begin
-	miss_rsp.rob_ptr <= r_rob_ptr;
-	miss_rsp.data <= r_rsp_data;
-	miss_rsp.addr <= r_saveaddr;
 	r_cycle <= reset ?  'd0 : r_cycle + 'd1;
      end
 
+   always_comb
+     begin
+	miss_rsp_val = r_miss_rsp_val;
+	miss_rsp.rob_ptr = r_rob_ptr;
+	miss_rsp.data = r_rsp_data;
+	miss_rsp.addr = r_saveaddr;
+     end
    
 
    
-   always_ff@(negedge clk)
-     begin
-	if(t_miss_req_ack)
-	  begin
-	     $display("l2 gets request for addrsss %x at cycle %d", miss_req.addr, r_cycle);
-	     
-	  end
-     end
+   //always_ff@(negedge clk)
+   //begin
+   //if(t_miss_req_ack)
+   ///begin
+   //$display("l2 gets request for addrsss %x at cycle %d", miss_req.addr, r_cycle);
+   //
+   //end
+    // end
    
      
    logic [127:0] 	t_d0;
