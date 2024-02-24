@@ -1355,12 +1355,13 @@ module l1d(clk,
 			 end // if (t_mem_head.is_store)
 		       else if(r_l2reqs[t_mem_head.rob_ptr])
 			 begin
-			     $display("l21q empty = %b, rob pointer on queue %d, head rob ptr %d", 
-			     	      l2l1q_empty, l2l1_head.rob_ptr, t_mem_head.rob_ptr);
+			    //$display("l21q empty = %b, rob pointer on queue %d, head rob ptr %d", 
+			    //l2l1q_empty, l2l1_head.rob_ptr, t_mem_head.rob_ptr);
 			    
 			    if(l2l1q_empty ? 1'b0 : (l2l1_head.rob_ptr == t_mem_head.rob_ptr))
 			      begin
 				 t_clear_l2reqs = 1'b1;
+				 $display("l2->l1 data comes back %x, addr %x", l2l1_head.data, l2l1_head.addr);
 				 //$stop();
 			      end
 			     

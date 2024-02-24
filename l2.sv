@@ -1,5 +1,11 @@
 `include "machine.vh"
 
+
+`ifdef VERILATOR
+import "DPI-C" function void write_dword(input longint addr, input longint data);
+import "DPI-C" function longint read_dword(input longint addr);
+`endif
+
 module l2(clk,
 	  reset,
 
@@ -169,30 +175,26 @@ module l2(clk,
    
    assign cache_hits = r_cache_hits;
    assign cache_accesses = r_cache_accesses;
+
+   logic		t_miss_req_ack;
+   
    
    always_comb
      begin
-	miss_req_ack = miss_req_val;
-
+	miss_req_ack = t_miss_req_ack;
      end
    
    always_ff@(posedge clk)
      begin
-	if(reset)
-	  begin
-	     miss_rsp_val <= 1'b0;
-	  end
-	else
-	  begin
-	     miss_rsp_val <= miss_req_val;
-	  end
+	miss_rsp_val <= reset ? 1'b0 : r_miss_rsp_val;
      end // always_ff@ (posedge clk)
 
    logic [63:0] r_cycle;
    always_ff@(posedge clk)
      begin
-	miss_rsp.rob_ptr <= miss_req.rob_ptr;
-	miss_rsp.data <= 'd0;
+	miss_rsp.rob_ptr <= r_rob_ptr;
+	miss_rsp.data <= r_rsp_data;
+	miss_rsp.addr <= r_saveaddr;
 	r_cycle <= reset ?  'd0 : r_cycle + 'd1;
      end
 
@@ -201,7 +203,7 @@ module l2(clk,
    
    always_ff@(negedge clk)
      begin
-	if(miss_req_val)
+	if(t_miss_req_ack)
 	  begin
 	     $display("l2 gets request for addrsss %x at cycle %d", miss_req.addr, r_cycle);
 	     
@@ -234,8 +236,10 @@ module l2(clk,
    logic 		r_l1i_req, n_l1i_req;
    logic 		r_last_gnt, n_last_gnt;
    logic 		n_req, r_req;
-
-
+   logic		n_miss_queue, r_miss_queue;
+   logic [`LG_ROB_ENTRIES-1:0] n_rob_ptr, r_rob_ptr;
+   logic		       r_miss_rsp_val, n_miss_rsp_val;
+   
       
    always_ff@(posedge clk)
      begin
@@ -268,6 +272,9 @@ module l2(clk,
 	     r_req <= 1'b0;
 	     r_last_l1i_addr <= 'd0;
 	     r_last_l1d_addr <= 'd0;
+	     r_miss_queue <= 1'b0;
+	     r_rob_ptr <= 'd0;
+	     r_miss_rsp_val <= 1'b0;
 	  end
 	else
 	  begin
@@ -297,7 +304,11 @@ module l2(clk,
 	     r_last_gnt <= n_last_gnt;
 	     r_req <= n_req;
 	     r_last_l1i_addr <= n_last_l1i_addr;
-	     r_last_l1d_addr <= n_last_l1d_addr;	     
+	     r_last_l1d_addr <= n_last_l1d_addr;
+	     r_miss_queue <= n_miss_queue;
+	     r_rob_ptr <= n_rob_ptr;
+	     r_miss_rsp_val <= n_miss_rsp_val;
+	     
 	  end
      end // always_ff@ (posedge clk)
 
@@ -407,6 +418,10 @@ module l2(clk,
 
 	t_gnt_l1i = 1'b0;
 	t_gnt_l1d = 1'b0;
+	t_miss_req_ack = 1'b0;
+	n_miss_queue = r_miss_queue;
+	n_rob_ptr = r_rob_ptr;
+	n_miss_rsp_val = 1'b0;
 	
 	case(r_state)
 	  INITIALIZE:
@@ -512,8 +527,26 @@ module l2(clk,
 		    n_state = CHECK_VALID_AND_TAG;
 		    n_cache_accesses = r_cache_accesses + 64'd1;
 		    n_cache_hits = r_cache_hits + 64'd1;
+		 end // if (w_l1d_req | w_l1i_req)
+	       else if(miss_req_val)
+		 begin
+		    t_miss_req_ack = 1'b1;
+		    n_miss_queue = 1'b1;
+		    n_last_gnt = 1'b1;
+		    t_idx = miss_req.addr[LG_L2_LINES+(`LG_L2_CL_LEN-1):`LG_L2_CL_LEN];		 
+		    n_tag = miss_req.addr[(`M_WIDTH-1):LG_L2_LINES+`LG_L2_CL_LEN];
+		    n_addr = {miss_req.addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
+		    n_last_l1d_addr = miss_req.addr[(`M_WIDTH-1):`LG_L2_CL_LEN];
+		    n_saveaddr = {miss_req.addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
+		    n_opcode = 'd4;
+		    n_state = CHECK_VALID_AND_TAG;
+		    n_cache_accesses = r_cache_accesses + 64'd1;
+		    n_cache_hits = r_cache_hits + 64'd1;
+		    n_rob_ptr = miss_req.rob_ptr;
+		   
 		 end
-	    end
+	    end // case: IDLE
+	  
 	  CHECK_VALID_AND_TAG:
 	    begin
 	       //load hit
@@ -524,7 +557,13 @@ module l2(clk,
 		      begin			 
 			 n_rsp_data = w_d0;
 			 n_state = IDLE;
-			 if(r_last_gnt == 1'b0)
+			 
+			 n_miss_queue = 1'b0;
+			 if(r_miss_queue)
+			   begin
+			      n_miss_rsp_val = 1'b1;
+			   end
+			 else if(r_last_gnt == 1'b0)
 			   begin
 			      n_l1i_rsp_valid  = 1'b1;
 			   end

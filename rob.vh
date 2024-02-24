@@ -75,7 +75,8 @@ typedef struct packed {
 
 typedef struct packed {
    logic [(1 << (`LG_L1D_CL_LEN+3)) - 1 :0] data;
-   logic [`LG_ROB_ENTRIES-1:0] rob_ptr;
+   logic [`M_WIDTH-1:0]			    addr;
+   logic [`LG_ROB_ENTRIES-1:0]		    rob_ptr;
 } miss_rsp_t;
 
 
