@@ -412,6 +412,16 @@ module l1d(clk,
      end // always_comb
 
    logic t_clear_l2reqs;
+
+   always_comb
+     begin
+	t_clear_l2reqs = 1'b0;
+	  if(!l2l1q_empty)
+	    begin
+	       t_clear_l2reqs = 1'b1;
+	    end
+     end
+
    
    always_comb
      begin
@@ -1122,7 +1132,6 @@ module l1d(clk,
 	n_is_retry = 1'b0;
 	t_reset_graduated = 1'b0;
 	t_force_clear_busy = 1'b0;
-	t_clear_l2reqs = 1'b0;
 	t_incr_busy = 1'b0;
 	
 	n_stall_store = 1'b0;
@@ -1209,7 +1218,7 @@ module l1d(clk,
 		    else
 		      begin
 			 t_push_miss = 1'b1;
-			 t_push_miss_req = !(t_port2_hit_cache || r_hit_inflight_addr2 || w_port2_same_line);
+			 t_push_miss_req = !(t_port2_hit_cache || r_hit_inflight_addr2 || w_port2_same_line || r_dirty_out2);
 			 t_push_miss_req_cand = !t_port2_hit_cache;
 			 
 			 if(t_port2_hit_cache)
@@ -1358,12 +1367,12 @@ module l1d(clk,
 			    //$display("l21q empty = %b, rob pointer on queue %d, head rob ptr %d", 
 			    //l2l1q_empty, l2l1_head.rob_ptr, t_mem_head.rob_ptr);
 			    
-			    if(l2l1q_empty ? 1'b0 : (l2l1_head.rob_ptr == t_mem_head.rob_ptr))
-			      begin
-				 t_clear_l2reqs = 1'b1;
-				 $display("l2->l1 data comes back %x, addr %x", l2l1_head.data, l2l1_head.addr);
-				 //$stop();
-			      end
+			    // if(l2l1q_empty ? 1'b0 : (l2l1_head.rob_ptr == t_mem_head.rob_ptr))
+			    //   begin
+			    // 	 /t_clear_l2reqs = 1'b1;
+			    // 	 $display("l2->l1 data comes back %x, addr %x", l2l1_head.data, l2l1_head.addr);
+			    // 	 //$stop();
+			    //   end
 			     
 			 end
 		       else
