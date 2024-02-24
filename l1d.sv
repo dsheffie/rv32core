@@ -139,7 +139,7 @@ module l1d(clk,
    logic 				  r_got_req2, r_last_wr2, n_last_wr2;
    logic 				  r_last_rd2, n_last_rd2;
    
-   logic 				  rr_got_req, rr_last_wr, rr_is_retry, rr_did_reload;
+   logic 				  rr_got_req, rr_last_wr, rr_is_retry, rr_did_reload, rr_got_req2;
 
    logic 				  r_lock_cache, n_lock_cache;
    
@@ -156,7 +156,7 @@ module l1d(clk,
    logic [L1D_CL_LEN_BITS-1:0] 		  r_array_out, t_data, t_data2;
    
    //2nd read port
-   logic [`LG_L1D_NUM_SETS-1:0] 	  t_cache_idx2, r_cache_idx2;
+   logic [`LG_L1D_NUM_SETS-1:0] 	  t_cache_idx2, r_cache_idx2, rr_cache_idx2;
    logic [N_TAG_BITS-1:0] 		  t_cache_tag2, r_cache_tag2, r_tag_out2;
    logic 				  r_valid_out2, r_dirty_out2;
    logic [L1D_CL_LEN_BITS-1:0] 		  r_array_out2;
@@ -637,6 +637,7 @@ module l1d(clk,
 	     r_flush_req <= 1'b0;
 	     r_flush_cl_req <= 1'b0;
 	     r_cache_idx <= 'd0;
+	     rr_cache_idx2 <= 'd0;
 	     r_cache_tag <= 'd0;
 	     r_cache_idx2 <= 'd0;
 	     r_cache_tag2 <= 'd0;
@@ -648,6 +649,8 @@ module l1d(clk,
 	     r_got_req2 <= 1'b0;
 	     
 	     rr_got_req <= 1'b0;
+	     rr_got_req2 <= 1'b0;
+	     
 	     r_lock_cache <= 1'b0;
 	     rr_is_retry <= 1'b0;
 	     rr_did_reload <= 1'b0;
@@ -684,7 +687,8 @@ module l1d(clk,
 	     r_flush_cl_req <= n_flush_cl_req;
 	     r_cache_idx <= t_cache_idx;
 	     r_cache_tag <= t_cache_tag;
-	     
+
+	     rr_cache_idx2 <= r_cache_idx2;
 	     r_cache_idx2 <= t_cache_idx2;
 	     r_cache_tag2 <= t_cache_tag2;
 	     rr_cache_idx <= r_cache_idx;
@@ -696,6 +700,8 @@ module l1d(clk,
 	     r_got_req2 <= t_got_req2;
 	     
 	     rr_got_req <= r_got_req;
+	     rr_got_req2 <= r_got_req2;
+	     
 	     r_lock_cache <= n_lock_cache;
 	     rr_is_retry <= r_is_retry;
 	     rr_did_reload <= r_did_reload;
@@ -1196,12 +1202,8 @@ module l1d(clk,
 		    else
 		      begin
 			 t_push_miss = 1'b1;
-			 t_push_miss_req = !(r_hit_inflight_addr2 || (t_cache_idx == r_cache_idx));
-			 //if(!t_push_miss_req)
-			 //begin
-			 //$display("cycle %d can't push %x, inflight %b, last %b", 
-			 //r_cycle, r_req2.addr, r_hit_inflight_addr2, t_cache_idx == r_cache_idx);
-			 //end
+			 t_push_miss_req = !(t_port2_hit_cache || r_hit_inflight_addr2 || ((r_cache_idx2 == rr_cache_idx2)&&rr_got_req2));
+			 
 			 if(t_port2_hit_cache)
 			   begin
 			      n_cache_hits = r_cache_hits + 'd1;
@@ -1345,13 +1347,12 @@ module l1d(clk,
 			 end // if (t_mem_head.is_store)
 		       else if(r_l2reqs[t_mem_head.rob_ptr])
 			 begin
-			    // $display("l21q empty = %b, rob pointer on queue %d, head rob ptr %d", 
-			    // 	     l2l1q_empty, l2l1_head.rob_ptr, t_mem_head.rob_ptr);
+			     $display("l21q empty = %b, rob pointer on queue %d, head rob ptr %d", 
+			     	      l2l1q_empty, l2l1_head.rob_ptr, t_mem_head.rob_ptr);
 			    
 			    if(l2l1q_empty ? 1'b0 : (l2l1_head.rob_ptr == t_mem_head.rob_ptr))
 			      begin
 				 t_clear_l2reqs = 1'b1;
-				 $display("rob ptr matches");
 				 //$stop();
 			      end
 			     
@@ -1550,6 +1551,21 @@ module l1d(clk,
 
    always_ff@(negedge clk)
      begin
+	
+	if(t_push_miss_req)
+	  begin
+	     $display("cycle %d l1->l2 miss req for %x", 
+		      r_cycle, r_req2.addr);
+	  end
+
+	if(t_push_miss& !t_port2_hit_cache)
+	  begin
+	     $display("l1 miss but not pushing l1->l2 queue for address %x",
+		      r_req2.addr);
+	  end
+	    
+
+	
       if(t_push_miss && mem_q_full)
 	begin
 	   $display("attempting to push to a full memory queue");
