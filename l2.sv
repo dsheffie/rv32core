@@ -1,4 +1,5 @@
 `include "machine.vh"
+`include "rob.vh"
 
 
 `ifdef VERILATOR
