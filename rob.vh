@@ -53,11 +53,11 @@ typedef struct packed {
 } insn_fetch_t;
 
 typedef struct packed {
-   logic [`M_WIDTH-1:0] addr;
+   logic [`M_WIDTH-1:0]	addr;
    logic 	is_store;
    logic 	is_load;
    mem_op_t op;
-   logic 	spans_cacheline;
+   logic	spans_cacheline;
    logic 	unaligned;
    logic [`LG_ROB_ENTRIES-1:0] rob_ptr;
    logic [`LG_PRF_ENTRIES-1:0] dst_ptr;

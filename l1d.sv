@@ -15,6 +15,10 @@ import "DPI-C" function void record_miss(input int pc,
 					 input int hit_cache,
 					 input int busy);
 
+import "DPI-C" function void record_l1d_push(input int push_miss,
+					     input int push_miss_l2q,
+					     input int push_miss_l2q_cand);
+
 `endif
 
 module l1d(clk, 
@@ -186,7 +190,7 @@ module l1d(clk,
    logic 				  t_got_rd_retry, t_port2_hit_cache;
       
    logic 				  t_mark_invalid;
-   logic 				  t_wr_array;
+   logic 				  t_wr_array, r_wr_array;
    logic 				  t_hit_cache;
    logic 				  t_rsp_dst_valid;
    logic [63:0] 			  t_rsp_data;
@@ -203,7 +207,7 @@ module l1d(clk,
    logic 				  t_got_req, t_got_req2;
    logic 				  t_got_miss;
    logic 				  t_push_miss;
-   logic				  t_push_miss_req;
+   logic				  t_push_miss_l2q;
    
    logic 				  t_mh_block, t_cm_block, t_cm_block2,
 					  t_cm_block_stall;
@@ -246,6 +250,7 @@ module l1d(clk,
    logic [N_MQ_ENTRIES-1:0] r_mq_addr_valid;
    logic [IDX_STOP-IDX_START-1:0] r_mq_addr[N_MQ_ENTRIES-1:0];
    logic 			  r_mq_is_load[N_MQ_ENTRIES-1:0];
+   
 
    mem_op_t r_mq_op[N_MQ_ENTRIES-1:0];
    miss_req_t r_l1l2_q[N_MQ_ENTRIES-1:0];
@@ -398,7 +403,7 @@ module l1d(clk,
      begin
 	n_l1l2q_head_ptr = r_l1l2q_head_ptr;
 	n_l1l2q_tail_ptr = r_l1l2q_tail_ptr;
-	if(t_push_miss_req)
+	if(t_push_miss_l2q)
 	  begin
 	     n_l1l2q_tail_ptr = r_l1l2q_tail_ptr + 'd1;
 	  end
@@ -456,7 +461,7 @@ module l1d(clk,
 	  end
 	else
 	  begin
-	     if(t_push_miss_req)
+	     if(t_push_miss_l2q)
 	       begin
 		  r_l2reqs[r_req2.rob_ptr] <= 1'b1;
 	       end
@@ -546,7 +551,7 @@ module l1d(clk,
 
    always_ff@(posedge clk)
      begin
-	if(t_push_miss_req)
+	if(t_push_miss_l2q)
 	  begin
 	     r_l1l2_q[r_l1l2q_tail_ptr[`LG_MRQ_ENTRIES-1:0]].addr <= r_req2.addr;
 	     r_l1l2_q[r_l1l2q_tail_ptr[`LG_MRQ_ENTRIES-1:0]].rob_ptr <= r_req2.rob_ptr;
@@ -586,6 +591,7 @@ module l1d(clk,
      end // always_ff@ (posedge clk)
 
    wire [N_MQ_ENTRIES-1:0] w_hit_busy_addrs;
+   wire [N_MQ_ENTRIES-1:0] w_any_inflight_store;
    logic [N_MQ_ENTRIES-1:0] r_hit_busy_addrs;
    logic 		   r_hit_busy_addr;
    
@@ -595,9 +601,11 @@ module l1d(clk,
    logic [N_MQ_ENTRIES-1:0] r_hit_inflight_addrs2;
 
    logic [N_MQ_ENTRIES-1:0] r_hit_busy_addrs2;
+   
    logic 		   r_hit_busy_addr2;
    logic		   r_hit_inflight_addr2;
    
+   logic		   r_any_inflight_store;
    
    generate
       for(genvar i = 0; i < N_MQ_ENTRIES; i=i+1)
@@ -610,21 +618,25 @@ module l1d(clk,
 					 r_mq_addr[i] == t_cache_idx2 : 1'b0;
 	   
 	   assign w_hit_inflight_addrs2[i] = r_mq_addr_valid[i] ? r_mq_addr[i] == t_cache_idx2 : 1'b0;
+	   
+	   assign w_any_inflight_store[i] = r_mq_addr_valid[i] ? !r_mq_is_load[i] : 1'b0;
+	   
 	end
    endgenerate
    
 
    always_ff@(posedge clk)
-	  begin
-	  r_hit_busy_addr <= reset ? 1'b0 : |w_hit_busy_addrs;
-	  r_hit_busy_addrs <= t_got_req ? w_hit_busy_addrs : {{N_MQ_ENTRIES{1'b1}}};
-	  
-	  r_hit_busy_addr2 <= reset ? 1'b0 : |w_hit_busy_addrs2;
-	  r_hit_inflight_addr2 <= reset ? 1'b0 : |w_hit_inflight_addrs2;
-	  
-	  r_hit_busy_addrs2 <= t_got_req2 ? w_hit_busy_addrs2 : {{N_MQ_ENTRIES{1'b1}}};
-	  
-	  r_hit_inflight_addrs2 <= w_hit_inflight_addrs2;
+     begin
+	r_hit_busy_addr <= reset ? 1'b0 : |w_hit_busy_addrs;
+	r_hit_busy_addrs <= t_got_req ? w_hit_busy_addrs : {{N_MQ_ENTRIES{1'b1}}};
+	
+	r_hit_busy_addr2 <= reset ? 1'b0 : |w_hit_busy_addrs2;
+	r_hit_inflight_addr2 <= reset ? 1'b0 : |w_hit_inflight_addrs2;
+	
+	r_hit_busy_addrs2 <= t_got_req2 ? w_hit_busy_addrs2 : {{N_MQ_ENTRIES{1'b1}}};
+	
+	r_hit_inflight_addrs2 <= w_hit_inflight_addrs2;
+	r_any_inflight_store <= |w_any_inflight_store;
      end // always_ff@ (posedge clk)
 
 
@@ -641,6 +653,7 @@ module l1d(clk,
      begin
 	if(reset)
 	  begin
+	     r_wr_array <= 1'b0;
 	     r_ack_ld_early <= 1'b0;
 	     r_did_reload <= 1'b0;
 	     r_stall_store <= 1'b0;
@@ -690,6 +703,7 @@ module l1d(clk,
 	  end
 	else
 	  begin
+	     r_wr_array <= t_wr_array;
 	     r_ack_ld_early <= t_ack_ld_early;
 	     r_did_reload <= n_did_reload;
 	     r_stall_store <= n_stall_store;
@@ -776,8 +790,8 @@ module l1d(clk,
      begin
    	if(t_wr_array)
    	  begin
-   	     $display("cycle %d : WRITING set %d WITH data %x, addr %x, op %d ptr %d, retry %b", 
-   		      r_cycle, r_cache_idx, t_array_data, r_req.addr, r_req.op, r_req.rob_ptr, r_is_retry);
+   	     $display("cycle %d : WRITING set %d WITH data %x, addr %x, op %d ptr %d, retry %b, pc %x", 
+   		      r_cycle, r_cache_idx, t_array_data, r_req.addr, r_req.op, r_req.rob_ptr, r_is_retry, r_req.pc);
    	  end	
      end // always_ff@ (negedge clk)
    
@@ -785,9 +799,14 @@ module l1d(clk,
      begin
    	if(mem_rsp_valid)
    	  begin
-   	     $display("cycle %d : CACHERELOAD from addr %x -> set %d data %x", 
-   		      r_cycle, r_mem_req_addr, r_mem_req_addr[IDX_STOP-1:IDX_START], t_array_wr_data);
+   	     $display("cycle %d : CACHERELOAD set %d from addr %x -> set %d data %x", 
+   		      r_cycle, r_mem_req_addr[IDX_STOP-1:IDX_START],r_mem_req_addr, r_mem_req_addr[IDX_STOP-1:IDX_START], t_array_wr_data);
    	  end
+	if(miss_rsp_val)
+	  begin
+   	     $display("cycle %d : L2 QUEUE RELOAD set %d from addr %x data %x, rob ptr %x", 
+   		      r_cycle, miss_rsp.addr[IDX_STOP-1:IDX_START], miss_rsp.addr, miss_rsp.data, miss_rsp.rob_ptr);
+	  end
 
      end
 `endif
@@ -847,7 +866,34 @@ module l1d(clk,
 	     t_dirty_wr_addr = l2l1_head.addr[IDX_STOP-1:IDX_START];
 	     t_write_dirty_en = 1'b1;
 	  end
-     end
+     end // always_comb
+
+   // always_ff@(negedge clk)
+   //   begin
+   // 	if(t_write_dirty_en & ('h0f6 == t_dirty_wr_addr) && t_dirty_value)
+   // 	  $display("cycle %d write %x dirty %b, %b, %b, %b",
+   // 		   r_cycle,
+   // 		   t_dirty_wr_addr, 
+   // 		   t_dirty_value,
+   // 		   mem_rsp_valid,
+   // 		   t_wr_array,
+   // 		   t_ack_l2q
+   // 		   );
+	
+   // 	if(t_mark_invalid & mem_rsp_valid)
+   // 	  $stop();
+   // 	if(t_mark_invalid & t_wr_array)
+   // 	  $stop();
+   // 	if(t_mark_invalid & t_ack_l2q)
+   // 	  $stop();
+   // 	if(mem_rsp_valid & t_wr_array)
+   // 	  $stop();
+   // 	if(mem_rsp_valid & t_ack_l2q)
+   // 	  $stop();
+   // 	if(t_wr_array & t_ack_l2q)
+   // 	  $stop();
+   //   end // always_ff@ (negedge clk)
+   
    
    ram2r1w #(.WIDTH(1), .LG_DEPTH(`LG_L1D_NUM_SETS)) dc_dirty
      (
@@ -911,7 +957,7 @@ module l1d(clk,
 
 
  
-   logic t_push_miss_req_cand;
+   logic t_push_miss_l2q_cand;
    
    
    always_comb
@@ -973,6 +1019,18 @@ module l1d(clk,
 	       r_req.op == MEM_SD ? 64'hffffffffffffffff :
 	       'd0;
 
+   // always_ff@(negedge clk)
+   //   begin
+   // 	if(t_wr_array)
+   // 	  begin
+   // 	     $display("writing array addr %x, pc %x, op %x, rob ptr %d",
+   // 		      r_req.addr, 
+   // 		      r_req.pc,
+   // 		      r_req.op,
+   // 		      r_req.rob_ptr);
+   // 	  end
+   //   end
+   
    always_comb
      begin
 	t_data = mem_rsp_valid ? mem_rsp_load_data : 
@@ -1077,11 +1135,12 @@ module l1d(clk,
      end
 
    wire w_port2_same_line = ((r_cache_idx2 == rr_cache_idx2)&&rr_got_req2);
+   wire	w_dirty_same_set = r_wr_array && (rr_cache_idx == r_req2.addr[IDX_STOP-1:IDX_START] );
    
    
    always_comb
      begin
-	t_push_miss_req_cand = 1'b0;	
+	t_push_miss_l2q_cand = 1'b0;	
 	t_ack_ld_early = 1'b0;
 	t_got_rd_retry = 1'b0;
 	t_port2_hit_cache = r_valid_out2 && (r_tag_out2 == r_cache_tag2);
@@ -1106,7 +1165,7 @@ module l1d(clk,
 	
 	t_got_miss = 1'b0;
 	t_push_miss = 1'b0;
-	t_push_miss_req = 1'b0;
+	t_push_miss_l2q = 1'b0;
 	
 	n_req = r_req;
 	n_req2 = r_req2;
@@ -1230,8 +1289,9 @@ module l1d(clk,
 		    else
 		      begin
 			 t_push_miss = 1'b1;
-			 t_push_miss_req = !(t_port2_hit_cache || r_hit_inflight_addr2 || w_port2_same_line || r_dirty_out2);
-			 t_push_miss_req_cand = !t_port2_hit_cache;
+			 t_push_miss_l2q = !(t_port2_hit_cache || r_hit_inflight_addr2 || w_port2_same_line || r_dirty_out2 || w_dirty_same_set);
+			 
+			 t_push_miss_l2q_cand = !t_port2_hit_cache;
 			 
 			 if(t_port2_hit_cache)
 			   begin
@@ -1350,8 +1410,10 @@ module l1d(clk,
 			    if(r_graduated[t_mem_head.rob_ptr] == 2'b10 && (core_store_data_valid ? (t_mem_head.rob_ptr == core_store_data.rob_ptr) : 1'b0) )
 			      begin
 `ifdef VERBOSE_L1D
-				 $display("firing store for %x with data %x at cycle %d for rob ptr %d", 
-					  t_mem_head.addr, t_mem_head.data, r_cycle, t_mem_head.rob_ptr);
+				 $display("firing store for %x set %d with data %x at cycle %d for rob ptr %d", 
+					  t_mem_head.addr,
+					  t_mem_head.addr[IDX_STOP-1:IDX_START], 
+					  t_mem_head.data, r_cycle, t_mem_head.rob_ptr);
 `endif
 				 t_pop_mq = 1'b1;
 				 core_store_data_ack = 1'b1;
@@ -1579,15 +1641,27 @@ module l1d(clk,
 	endcase // case r_state
      end // always_comb
 
+`ifdef VERILATOR
    always_ff@(negedge clk)
      begin
+	if(r_req.is_load)
+	  begin
+	     record_l1d_push(t_push_miss ? 32'd1 : 32'd0,
+			     t_push_miss_l2q ? 32'd1 : 32'd0,
+			     t_push_miss_l2q_cand ? 32'd1 : 32'd0);
+	  end
 	
-	// if(t_push_miss_req)
-	//   begin
-	//      $display("cycle %d l1->l2 miss req for %x", 
-	// 	      r_cycle, r_req2.addr);
-	//   end
-	// else if(t_push_miss_req_cand)
+	if(t_push_miss_l2q)
+	begin
+	   //$display("cycle %d l1->l2 miss req for addr %x, set %d", 
+	   //r_cycle, r_req2.addr, r_req2.addr[IDX_STOP-1:IDX_START]);
+	   if(r_wr_array && (rr_cache_idx == r_req2.addr[IDX_STOP-1:IDX_START] ))
+	     begin
+		$stop();
+	     end
+	end
+	
+	// else if(t_push_miss_l2q_cand)
 	//   begin
 	//      $display("l1 miss but not pushing l1->l2 queue for address %x : hit cache %b, inflight %b, match last %b, inflight %b",
 	// 	      r_req2.addr,
@@ -1612,7 +1686,7 @@ module l1d(clk,
 	  end
      end
 
-`ifdef VERILATOR
+
    logic [31:0] t_stall_reason;
    always_comb
      begin

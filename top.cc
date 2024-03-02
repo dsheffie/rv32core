@@ -85,6 +85,8 @@ static uint64_t l1d_stall_reasons[8] = {0};
 static bool pending_fault = false;
 static uint64_t fault_start_cycle = 0;
 
+static uint64_t l1d_pushes = 0, l1d_pushes_l2q = 0, l1d_pushes_l2q_cand;
+
 void record_branches(int n_branches) {
   branch_distribution[n_branches]++;
 }
@@ -110,6 +112,12 @@ void record_restart(int cycles) {
 
 void record_ds_restart(int cycles) {
   restart_ds_distribution[cycles]++;
+}
+
+void record_l1d_push(int miss, int miss_l2q, int miss_l2q_cand) {
+  l1d_pushes += miss;
+  l1d_pushes_l2q += miss_l2q;
+  l1d_pushes_l2q_cand += miss_l2q_cand;
 }
 
 void record_miss(int pc_, int hit, int busy) {
@@ -640,6 +648,20 @@ int main(int argc, char **argv) {
     
     if(tb->got_monitor) {
       uint32_t to_host = mem_r32(s, globals::tohost_addr);
+
+      uint64_t *ptr0 = reinterpret_cast<uint64_t*>(ss->mem);
+      uint64_t *ptr1 = reinterpret_cast<uint64_t*>(s->mem);
+      int errors = 0;
+      for(uint64_t i = 0; i < ((1UL<<32) / sizeof(uint64_t)); i++) {
+	if(ptr0[i] != ptr1[i]) {
+	  std::cout << std::hex << (i*8) << "," << ptr0[i] << "," << ptr1[i] << "\n";
+	  ++errors;
+	}
+      }
+      if(errors) {
+	exit(-1);
+      }
+      
       if(to_host) {
 	if(to_host & 1) {
 	  break;
@@ -1016,7 +1038,15 @@ int main(int argc, char **argv) {
     }
     else {
       std::cout << "checker mem does not equal rtl mem\n";
-    }       
+      uint64_t *ptr0 = reinterpret_cast<uint64_t*>(ss->mem);
+      uint64_t *ptr1 = reinterpret_cast<uint64_t*>(s->mem);
+      std::ofstream mem_errors("mem_errors.txt");
+      for(uint64_t i = 0; i < ((1UL<<32) / sizeof(uint64_t)); i++) {
+	if(ptr0[i] != ptr1[i]) {
+	  mem_errors << std::hex << (i*8) << "," << ptr0[i] << "," << ptr1[i] << "\n";
+	}
+      }
+    }      
   }
   
   if(!incorrect) {
@@ -1218,10 +1248,9 @@ int main(int argc, char **argv) {
     out << "avg mispred branch alloc to complete = " << avg_mem_lat << "\n";
     out << "median mispred branch alloc to complete = " << median_mem_lat << "\n";
     
-    out << "l1d_reqs = " << l1d_reqs << "\n";
-    out << "l1d_acks = " << l1d_acks << "\n";
-    out << "l1d_stores = " << l1d_stores << "\n";
-    out << "l1d tput = " << (static_cast<double>(l1d_acks) /l1d_reqs) << "\n";
+    out << "l1d pushes = " << l1d_pushes << "\n";
+    out << "l1d_pushes_l2q = " << l1d_pushes_l2q << "\n";
+    out << "l1d_pushes_l2q_cand = " << l1d_pushes_l2q_cand << "\n";
     
     //for(auto &p :block_distribution) {
     //out << p.first << "," << p.second << "\n";

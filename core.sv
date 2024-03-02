@@ -679,6 +679,17 @@ module core(clk,
 //`define DEBUG
 `ifdef VERILATOR
    logic [31:0] t_faults, t_branches;
+
+   // always_ff@(negedge clk)
+   //   begin
+   // 	if(n_state == DRAIN && r_state == ACTIVE)
+   // 	  begin
+   // 	     $display("cycle %d machine clear -> fault from pc %x", 
+   // 		      r_cycle, t_rob_head.pc);
+   // 	  end
+   //   end
+
+   
    always_comb
      begin
 	t_faults = 'd0;
@@ -707,7 +718,7 @@ module core(clk,
 `ifdef DUMP_ROB
    always_ff@(negedge clk)
      begin
-	if(1)
+	if(n_state == DRAIN && r_state == ACTIVE)
 	  begin
 	     $display("cycle %d : state = %d, alu complete %b, mem complete %b,head_ptr %d, inflight %d, complete %b,  can_retire_rob_head %b, head pc %x, empty %b, full %b, bob full %b", 
 		      r_cycle,
