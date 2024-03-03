@@ -7,6 +7,16 @@ import "DPI-C" function void write_dword(input longint addr, input longint data)
 import "DPI-C" function longint read_dword(input longint addr);
 `endif
 
+typedef struct packed {
+   logic       l2_miss_queue;
+   logic       iside;
+   logic [`M_WIDTH-1:0]	addr;
+   logic [(1 << (`LG_L1D_CL_LEN+3)) - 1:0] data;
+   logic [3:0]				   opcode;
+   logic [`LG_ROB_ENTRIES-1:0]		   rob_ptr;
+} l2_txn_t;
+
+
 module l2(clk,
 	  reset,
 
@@ -244,6 +254,40 @@ module l2(clk,
    logic		n_miss_queue, r_miss_queue;
    logic [`LG_ROB_ENTRIES-1:0] n_rob_ptr, r_rob_ptr;
    logic		       r_miss_rsp_val, n_miss_rsp_val;
+
+   logic		       t_push_q, t_pop_q;
+   wire			       w_full_q, w_empty_q;
+   
+   l2_txn_t t_txn, tt_txn;
+   
+
+   fifo#(.W($bits(l2_txn_t)), .LG_D(2))
+   q (
+      .clk(clk),
+      .reset(reset),
+      .in(t_txn),
+      .out(tt_txn),
+      .push(t_push_q),
+      .pop(t_pop_q),
+      .empty(w_empty_q),
+      .full(w_full_q)
+      );
+
+
+   
+
+   // always_ff@(negedge clk)
+   //   begin
+   // 	if(n_miss_rsp_val)
+   // 	  begin
+   // 	     if(tt_txn.rob_ptr != {1'b0,r_rob_ptr})
+   // 	       begin
+   // 		  $display("pointer mismatch, got %d from queue but expected %d!", 
+   // 			   tt_txn.rob_ptr, r_rob_ptr);
+   // 		  $stop();
+   // 	       end
+   // 	  end
+   //   end
    
       
    always_ff@(posedge clk)
@@ -337,6 +381,8 @@ module l2(clk,
 	n_need_l1d = r_need_l1d | l1d_flush_req;
 	n_need_l1i = r_need_l1i | l1i_flush_req;
 	t_l2_flush_req = 1'b0;
+
+	
 	case(r_flush_state)
 	  WAIT_FOR_FLUSH:
 	    begin
@@ -374,6 +420,44 @@ module l2(clk,
    wire w_l1i_req = r_l1i_req | l1i_req;
    wire w_l1d_req = r_l1d_req | l1d_req;
 
+   wire	w_req_both = w_l1i_req & w_l1d_req;
+   wire	w_req_any  = w_l1i_req | w_l1d_req;
+   wire	w_sel_l1i  = w_req_both ? !r_last_gnt : (w_l1i_req & (!w_l1d_req));
+   wire	w_sel_l1d  = w_req_both ?  r_last_gnt : (w_l1d_req & (!w_l1i_req));   
+   
+
+   always_comb
+     begin
+	t_push_q = 1'b0;
+	t_txn = 'd0;	
+	if(!w_full_q)
+	  begin
+	     if(w_sel_l1i)
+	       begin
+		  t_push_q = 1'b1;		  
+		  t_txn.iside = 1'b1;
+		  t_txn.addr = l1i_addr;
+		  t_txn.opcode = MEM_LW;
+	       end
+	     else if(w_sel_l1d)
+	       begin
+		  t_push_q = 1'b1;		  
+		  t_txn.addr = l1d_addr;
+		  t_txn.data = l1_mem_req_store_data;
+		  t_txn.opcode = MEM_LW;		  
+	       end
+	     else if(miss_req_val)
+	       begin
+		  t_push_q = 1'b1;
+		  t_txn.rob_ptr = miss_req.rob_ptr;
+		  t_txn.addr = miss_req.addr;
+		  t_txn.opcode = MEM_LW;
+		  t_txn.l2_miss_queue = 1'b1;
+	       end
+	  end // if (!w_full_q)
+     end // always_comb
+   
+   
 
    
    always_comb
@@ -427,6 +511,8 @@ module l2(clk,
 	n_miss_queue = r_miss_queue;
 	n_rob_ptr = r_rob_ptr;
 	n_miss_rsp_val = 1'b0;
+
+	t_pop_q = 1'b0;
 	
 	case(r_state)
 	  INITIALIZE:
@@ -460,84 +546,55 @@ module l2(clk,
 		    t_idx = 'd0;
 		    n_state = FLUSH_WAIT;
 		 end
-	       else if(w_l1d_req | w_l1i_req)
+	       else if(w_sel_l1i)
 		 begin
-		    if(w_l1i_req & (!w_l1d_req))
-		      begin
-			 //$display("accepting i-side, addr=%x", 
-			 //l1i_addr);			 
-			 n_last_gnt = 1'b0;			 
-			 t_idx = l1i_addr[LG_L2_LINES+(`LG_L2_CL_LEN-1):`LG_L2_CL_LEN];
-			 n_tag = l1i_addr[(`M_WIDTH-1):LG_L2_LINES+`LG_L2_CL_LEN];
-			 n_last_l1i_addr = l1i_addr[(`M_WIDTH-1):`LG_L2_CL_LEN];
-			 n_addr = {l1i_addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
-			 n_saveaddr = {l1i_addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
-			 n_opcode = MEM_LW;
-			 n_l1i_req = 1'b0;
-			 t_gnt_l1i = 1'b1;
-		      end
-		    else if((!w_l1i_req) & w_l1d_req)
-		      begin
-			 if(l1d_opcode != MEM_SW)
-			   ///$display("accepting d-side, addr = %x, store=%b", 
-			   //l1d_addr, l1d_opcode == MEM_SW);
-			 n_last_gnt = 1'b1;
-			 t_idx = l1d_addr[LG_L2_LINES+(`LG_L2_CL_LEN-1):`LG_L2_CL_LEN];			 
-			 n_tag = l1d_addr[(`M_WIDTH-1):LG_L2_LINES+`LG_L2_CL_LEN];
-			 n_addr = {l1d_addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
-			 n_last_l1d_addr = l1d_addr[(`M_WIDTH-1):`LG_L2_CL_LEN];			 
-			 n_saveaddr = {l1d_addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
-			 n_store_data = l1_mem_req_store_data;
-			 n_opcode = l1d_opcode;
-			 n_l1d_req = 1'b0;			 
-			 if(l1d_opcode == MEM_SW)
-			   begin
-			      n_l1d_rsp_valid = 1'b1;
-			   end
-			 t_gnt_l1d = 1'b1;
-		      end
-		    else
-		      begin
-			 if(r_last_gnt)
-			   begin
-			      n_last_gnt = 1'b0;			 
-			      t_idx = l1i_addr[LG_L2_LINES+(`LG_L2_CL_LEN-1):`LG_L2_CL_LEN];			 			      
-			      n_tag = l1i_addr[(`M_WIDTH-1):LG_L2_LINES+`LG_L2_CL_LEN];
-			      n_last_l1i_addr = l1i_addr[(`M_WIDTH-1):`LG_L2_CL_LEN];
-			      n_addr = {l1i_addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
-			      n_saveaddr = {l1i_addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
-			      n_opcode = MEM_LW;
-			      n_l1i_req = 1'b0;	
-			      t_gnt_l1i = 1'b1;
-			   end
-			 else
-			   begin
-			      n_last_gnt = 1'b1;
-			      t_idx = l1d_addr[LG_L2_LINES+(`LG_L2_CL_LEN-1):`LG_L2_CL_LEN];			 			      			      
-			      n_tag = l1d_addr[(`M_WIDTH-1):LG_L2_LINES+`LG_L2_CL_LEN];
-			      n_addr = {l1d_addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
-			      n_last_l1d_addr = l1d_addr[(`M_WIDTH-1):`LG_L2_CL_LEN];
-			      n_saveaddr = {l1d_addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
-			      n_store_data = l1_mem_req_store_data;
-			      n_opcode = l1d_opcode;
-			      n_l1d_req = 1'b0;			 			      
-			      if(l1d_opcode == MEM_SW)
-				begin
-				   n_l1d_rsp_valid = 1'b1;
-				end
-			      t_gnt_l1d = 1'b1;
-			   end
-		      end
+		    //$display("accepting i-side, addr=%x", l1i_addr);
+		    
+		    n_last_gnt = 1'b0;			 
+		    t_idx = l1i_addr[LG_L2_LINES+(`LG_L2_CL_LEN-1):`LG_L2_CL_LEN];
+		    n_tag = l1i_addr[(`M_WIDTH-1):LG_L2_LINES+`LG_L2_CL_LEN];
+		    n_last_l1i_addr = l1i_addr[(`M_WIDTH-1):`LG_L2_CL_LEN];
+		    n_addr = {l1i_addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
+		    n_saveaddr = {l1i_addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
+		    n_opcode = MEM_LW;
+		    n_l1i_req = 1'b0;
+		    t_gnt_l1i = 1'b1;
+		    
 		    n_req_ack = 1'b1;
 		    n_state = CHECK_VALID_AND_TAG;
 		    n_cache_accesses = r_cache_accesses + 64'd1;
 		    n_cache_hits = r_cache_hits + 64'd1;
-		 end // if (w_l1d_req | w_l1i_req)
+		 end
+	       else if(w_sel_l1d)
+		 begin
+		    //$display("accepting d-side, addr = %x, store=%b", l1d_addr, l1d_opcode == MEM_SW);
+		    
+		    n_last_gnt = 1'b1;
+		    t_idx = l1d_addr[LG_L2_LINES+(`LG_L2_CL_LEN-1):`LG_L2_CL_LEN];			 
+		    n_tag = l1d_addr[(`M_WIDTH-1):LG_L2_LINES+`LG_L2_CL_LEN];
+		    n_addr = {l1d_addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
+		    n_last_l1d_addr = l1d_addr[(`M_WIDTH-1):`LG_L2_CL_LEN];			 
+		    n_saveaddr = {l1d_addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
+		    n_store_data = l1_mem_req_store_data;
+		    n_opcode = l1d_opcode;
+		    n_l1d_req = 1'b0;			 
+		    if(l1d_opcode == MEM_SW)
+		      begin
+			 n_l1d_rsp_valid = 1'b1;
+		      end
+		    t_gnt_l1d = 1'b1;
+
+		    n_req_ack = 1'b1;
+		    n_state = CHECK_VALID_AND_TAG;
+		    n_cache_accesses = r_cache_accesses + 64'd1;
+		    n_cache_hits = r_cache_hits + 64'd1;
+		 end
 	       else if(miss_req_val)
 		 begin
 		    t_miss_req_ack = 1'b1;
-		    n_miss_queue = 1'b1;
 		    n_last_gnt = 1'b1;
+		    
+		    n_miss_queue = 1'b1;
 		    t_idx = miss_req.addr[LG_L2_LINES+(`LG_L2_CL_LEN-1):`LG_L2_CL_LEN];		 
 		    n_tag = miss_req.addr[(`M_WIDTH-1):LG_L2_LINES+`LG_L2_CL_LEN];
 		    n_addr = {miss_req.addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
@@ -548,8 +605,7 @@ module l2(clk,
 		    n_cache_accesses = r_cache_accesses + 64'd1;
 		    n_cache_hits = r_cache_hits + 64'd1;
 		    n_rob_ptr = miss_req.rob_ptr;
-		   
-		 end
+		 end // if (miss_req_val)
 	    end // case: IDLE
 	  
 	  CHECK_VALID_AND_TAG:
@@ -567,6 +623,7 @@ module l2(clk,
 			 if(r_miss_queue)
 			   begin
 			      n_miss_rsp_val = 1'b1;
+			      t_pop_q = 1'b1;
 			   end
 			 else if(r_last_gnt == 1'b0)
 			   begin
