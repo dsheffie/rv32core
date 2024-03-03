@@ -120,8 +120,7 @@ module l2(clk,
    logic [LG_L2_LINES-1:0] t_idx, r_idx;
    logic [TAG_BITS-1:0]    n_tag, r_tag;
 
-   logic [`M_WIDTH-(`LG_L2_CL_LEN+1):0]    n_last_l1i_addr, r_last_l1i_addr;
-   logic [`M_WIDTH-(`LG_L2_CL_LEN+1):0]    n_last_l1d_addr, r_last_l1d_addr;
+
    logic 		   t_gnt_l1i, t_gnt_l1d;
    
    
@@ -250,7 +249,6 @@ module l2(clk,
    logic 		r_l1d_req, n_l1d_req;
    logic 		r_l1i_req, n_l1i_req;
    logic 		r_last_gnt, n_last_gnt;
-   logic 		n_req, r_req;
    logic		n_miss_queue, r_miss_queue;
    logic [`LG_ROB_ENTRIES-1:0] n_rob_ptr, r_rob_ptr;
    logic		       r_miss_rsp_val, n_miss_rsp_val;
@@ -289,11 +287,15 @@ module l2(clk,
    // 	  end
    //   end
    
+   logic n_was_dside, r_was_dside;
+   logic n_was_iside, r_was_iside;
       
    always_ff@(posedge clk)
      begin
 	if(reset)
 	  begin
+	     r_was_dside <= 1'b0;
+	     r_was_iside <= 1'b0;
 	     r_state <= INITIALIZE;
 	     r_flush_state <= WAIT_FOR_FLUSH;
 	     r_flush_complete <= 1'b0;
@@ -318,15 +320,14 @@ module l2(clk,
 	     r_l1d_req <= 1'b0;
 	     r_l1i_req <= 1'b0;
 	     r_last_gnt <= 1'b0;
-	     r_req <= 1'b0;
-	     r_last_l1i_addr <= 'd0;
-	     r_last_l1d_addr <= 'd0;
 	     r_miss_queue <= 1'b0;
 	     r_rob_ptr <= 'd0;
 	     r_miss_rsp_val <= 1'b0;
 	  end
 	else
 	  begin
+	     r_was_dside <= n_was_dside;
+	     r_was_iside <= n_was_iside;
 	     r_state <= n_state;
 	     r_flush_state <= n_flush_state;
 	     r_flush_complete <= n_flush_complete;
@@ -351,9 +352,6 @@ module l2(clk,
 	     r_l1d_req <= n_l1d_req;
 	     r_l1i_req <= n_l1i_req;
 	     r_last_gnt <= n_last_gnt;
-	     r_req <= n_req;
-	     r_last_l1i_addr <= n_last_l1i_addr;
-	     r_last_l1d_addr <= n_last_l1d_addr;
 	     r_miss_queue <= n_miss_queue;
 	     r_rob_ptr <= n_rob_ptr;
 	     r_miss_rsp_val <= n_miss_rsp_val;
@@ -428,12 +426,24 @@ module l2(clk,
 
    always_comb
      begin
+	t_gnt_l1i = 1'b0;
+	t_gnt_l1d = 1'b0;
+	n_l1i_req = r_l1i_req | l1i_req;
+	n_l1d_req = r_l1d_req | l1d_req;
+
+	n_last_gnt = r_last_gnt;
+	n_req_ack = 1'b0;
+	t_miss_req_ack = 1'b0;		  
 	t_push_q = 1'b0;
 	t_txn = 'd0;	
 	if(!w_full_q)
 	  begin
 	     if(w_sel_l1i)
 	       begin
+		  n_l1i_req = 1'b0;		  
+		  n_last_gnt = 1'b0;
+		  n_req_ack = 1'b1;
+		  t_gnt_l1i = 1'b1;
 		  t_push_q = 1'b1;		  
 		  t_txn.iside = 1'b1;
 		  t_txn.addr = l1i_addr;
@@ -441,13 +451,19 @@ module l2(clk,
 	       end
 	     else if(w_sel_l1d)
 	       begin
+		  n_l1d_req = 1'b0;			 		  
+		  n_last_gnt = 1'b1;
+		  n_req_ack = 1'b1;
+		  t_gnt_l1d = 1'b1;	  
 		  t_push_q = 1'b1;		  
 		  t_txn.addr = l1d_addr;
 		  t_txn.data = l1_mem_req_store_data;
-		  t_txn.opcode = MEM_LW;		  
+		  t_txn.opcode = l1d_opcode;		  
 	       end
 	     else if(miss_req_val)
 	       begin
+		  n_last_gnt = 1'b1;
+		  t_miss_req_ack = 1'b1;		  
 		  t_push_q = 1'b1;
 		  t_txn.rob_ptr = miss_req.rob_ptr;
 		  t_txn.addr = miss_req.addr;
@@ -462,12 +478,6 @@ module l2(clk,
    
    always_comb
      begin
-	n_last_gnt = r_last_gnt;
-	n_l1i_req = r_l1i_req | l1i_req;
-	n_l1d_req = r_l1d_req | l1d_req;
-	n_req = r_req;
-	
-	
 	n_state = r_state;
 	n_flush_complete = 1'b0;
 	t_wr_valid = 1'b0;
@@ -481,7 +491,6 @@ module l2(clk,
 	n_addr = r_addr;
 	n_saveaddr = r_saveaddr;
 	
-	n_req_ack = 1'b0;
 	n_mem_req = r_mem_req;
 	n_mem_opcode = r_mem_opcode;
 		
@@ -502,17 +511,15 @@ module l2(clk,
 	n_cache_hits = r_cache_hits;
 	n_cache_accesses = r_cache_accesses;
 
-	n_last_l1i_addr = r_last_l1i_addr;
-	n_last_l1d_addr = r_last_l1d_addr;
-
-	t_gnt_l1i = 1'b0;
-	t_gnt_l1d = 1'b0;
-	t_miss_req_ack = 1'b0;
+	
 	n_miss_queue = r_miss_queue;
 	n_rob_ptr = r_rob_ptr;
 	n_miss_rsp_val = 1'b0;
 
 	t_pop_q = 1'b0;
+	n_was_dside = r_was_dside;
+	n_was_iside = r_was_iside;
+	
 	
 	case(r_state)
 	  INITIALIZE:
@@ -546,66 +553,53 @@ module l2(clk,
 		    t_idx = 'd0;
 		    n_state = FLUSH_WAIT;
 		 end
-	       else if(w_sel_l1i)
+	       else if(!w_empty_q)
 		 begin
-		    //$display("accepting i-side, addr=%x", l1i_addr);
+		    t_pop_q = 1'b1;
 		    
-		    n_last_gnt = 1'b0;			 
-		    t_idx = l1i_addr[LG_L2_LINES+(`LG_L2_CL_LEN-1):`LG_L2_CL_LEN];
-		    n_tag = l1i_addr[(`M_WIDTH-1):LG_L2_LINES+`LG_L2_CL_LEN];
-		    n_last_l1i_addr = l1i_addr[(`M_WIDTH-1):`LG_L2_CL_LEN];
-		    n_addr = {l1i_addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
-		    n_saveaddr = {l1i_addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
-		    n_opcode = MEM_LW;
-		    n_l1i_req = 1'b0;
-		    t_gnt_l1i = 1'b1;
+		    t_idx = tt_txn.addr[LG_L2_LINES+(`LG_L2_CL_LEN-1):`LG_L2_CL_LEN];		 
+		    n_tag = tt_txn.addr[(`M_WIDTH-1):LG_L2_LINES+`LG_L2_CL_LEN];
+		    n_addr = {tt_txn.addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
+		    n_store_data = tt_txn.data;
 		    
-		    n_req_ack = 1'b1;
-		    n_state = CHECK_VALID_AND_TAG;
-		    n_cache_accesses = r_cache_accesses + 64'd1;
-		    n_cache_hits = r_cache_hits + 64'd1;
-		 end
-	       else if(w_sel_l1d)
-		 begin
-		    //$display("accepting d-side, addr = %x, store=%b", l1d_addr, l1d_opcode == MEM_SW);
-		    
-		    n_last_gnt = 1'b1;
-		    t_idx = l1d_addr[LG_L2_LINES+(`LG_L2_CL_LEN-1):`LG_L2_CL_LEN];			 
-		    n_tag = l1d_addr[(`M_WIDTH-1):LG_L2_LINES+`LG_L2_CL_LEN];
-		    n_addr = {l1d_addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
-		    n_last_l1d_addr = l1d_addr[(`M_WIDTH-1):`LG_L2_CL_LEN];			 
-		    n_saveaddr = {l1d_addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
-		    n_store_data = l1_mem_req_store_data;
-		    n_opcode = l1d_opcode;
-		    n_l1d_req = 1'b0;			 
-		    if(l1d_opcode == MEM_SW)
-		      begin
-			 n_l1d_rsp_valid = 1'b1;
-		      end
-		    t_gnt_l1d = 1'b1;
+		    n_saveaddr = {tt_txn.addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
+		    n_opcode = tt_txn.opcode;
 
-		    n_req_ack = 1'b1;
-		    n_state = CHECK_VALID_AND_TAG;
-		    n_cache_accesses = r_cache_accesses + 64'd1;
-		    n_cache_hits = r_cache_hits + 64'd1;
-		 end
-	       else if(miss_req_val)
-		 begin
-		    t_miss_req_ack = 1'b1;
-		    n_last_gnt = 1'b1;
+		    if(tt_txn.iside)
+		      begin
+			 n_was_dside = 1'b0;
+			 n_was_iside = 1'b1;			 
+		      end
+		    else if(tt_txn.l2_miss_queue)
+		      begin
+			 n_miss_queue = 1'b1;
+			 n_was_dside = 1'b0;
+			 n_was_iside = 1'b0;
+		      end
+		    else
+		      begin
+			 n_l1d_rsp_valid = l1d_opcode == MEM_SW;
+			 n_was_dside = l1d_opcode == MEM_LW;
+			 n_was_iside = 1'b0;			 
+			 
+		      end
+
+		    //$display("cycle %d ACCEPT L2 for address %x, op %d, iside %b l2q %b was_dside %b was_iside %b",
+		    //	     r_cycle,
+		    //	     n_addr, 
+		    //	     n_opcode,
+		    //tt_txn.iside, 
+		    //tt_txn.l2_miss_queue,
+		    //n_was_dside,
+		    //n_was_iside);
 		    
-		    n_miss_queue = 1'b1;
-		    t_idx = miss_req.addr[LG_L2_LINES+(`LG_L2_CL_LEN-1):`LG_L2_CL_LEN];		 
-		    n_tag = miss_req.addr[(`M_WIDTH-1):LG_L2_LINES+`LG_L2_CL_LEN];
-		    n_addr = {miss_req.addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
-		    n_last_l1d_addr = miss_req.addr[(`M_WIDTH-1):`LG_L2_CL_LEN];
-		    n_saveaddr = {miss_req.addr[(`M_WIDTH-1):`LG_L2_CL_LEN], {{`LG_L2_CL_LEN{1'b0}}}};
-		    n_opcode = 'd4;
 		    n_state = CHECK_VALID_AND_TAG;
 		    n_cache_accesses = r_cache_accesses + 64'd1;
 		    n_cache_hits = r_cache_hits + 64'd1;
-		    n_rob_ptr = miss_req.rob_ptr;
-		 end // if (miss_req_val)
+		    n_rob_ptr = tt_txn.rob_ptr;
+		    n_miss_queue = tt_txn.l2_miss_queue;
+		 end
+
 	    end // case: IDLE
 	  
 	  CHECK_VALID_AND_TAG:
@@ -623,16 +617,10 @@ module l2(clk,
 			 if(r_miss_queue)
 			   begin
 			      n_miss_rsp_val = 1'b1;
-			      t_pop_q = 1'b1;
 			   end
-			 else if(r_last_gnt == 1'b0)
-			   begin
-			      n_l1i_rsp_valid  = 1'b1;
-			   end
-			 else
-			   begin
-			      n_l1d_rsp_valid  = 1'b1;
-			   end
+			 n_l1i_rsp_valid  = r_was_iside;
+			 n_l1d_rsp_valid  = r_was_dside;
+			 
 			 //$display("cycle %d : ack'd for address %x, n_l1i_req = %b, n_l1d_req = %b, n_l1i_rsp_valid =%b, n_l1d_rsp_valid = %b", 
 			 //r_cycle, r_addr, n_l1i_req, n_l1d_req, n_l1i_rsp_valid,n_l1d_rsp_valid);			 
 		      end

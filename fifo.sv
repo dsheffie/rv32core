@@ -14,14 +14,21 @@ module fifo#(parameter W = 32, parameter LG_D = 3)(clk, reset, in, out, push, po
    localparam		D = 1<<LG_D;
       
    logic [W-1:0]	r_ram [D-1:0];
-   
+
+   always_ff@(negedge clk)
+     begin
+	if(pop & empty)
+	  $stop();
+	if(push & full)
+	  $stop();
+     end
    
    always_comb
      begin
 	n_rd_idx = r_rd_idx;
 	n_wr_idx = r_wr_idx;
 	
-	empty = r_rd_idx == r_wr_idx;
+	empty = (r_rd_idx == r_wr_idx);
 	full = (r_rd_idx[LG_D-1:0] == r_wr_idx[LG_D-1:0]) &
 	       (r_rd_idx[LG_D] != r_wr_idx[LG_D]);
 	if(push)
