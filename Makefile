@@ -4,35 +4,16 @@ OBJ = top.o verilated.o verilated_vcd_c.o loadelf.o interpret.o disassemble.o he
 
 SV_SRC = core_l1d_l1i.sv core.sv exec.sv decode_riscv.sv shiftregbit.sv shift_right.sv mul.sv find_first_set.sv divider.sv l1d.sv l1i.sv machine.vh rob.vh uop.vh ram1r1w.sv ram2r1w.sv popcount.sv count_leading_zeros.sv fair_sched.sv ppa32.sv ppa64.sv csa.sv rf6r3w.sv reg_ram1rw.sv perfect_l1d.sv l2.sv mwidth_add.sv addsub.sv
 
-ifeq ($(UNAME_S),Linux)
-	CXX = clang++-13 -flto -DUSE_SDL
-	MAKE = make
-	VERILATOR_SRC = /home/dsheffie/local/share/verilator/include/verilated.cpp
-	VERILATOR_VCD = /home/dsheffie/local/share/verilator/include/verilated_vcd_c.cpp
-	VERILATOR_INC = /home/dsheffie/local/share/verilator/include
-	VERILATOR_DPI_INC = /home/dsheffie/local/share/verilator/include/vltstd/
-	VERILATOR = /home/dsheffie/local/bin/verilator
-	EXTRA_LD = -lcapstone -lboost_program_options  -lboost_serialization -lSDL2 -lunwind
-endif
+CXX = clang++-13 -flto
+MAKE = make
+VERILATOR_SRC = /home/dsheffie/local/share/verilator/include/verilated.cpp
+VERILATOR_VCD = /home/dsheffie/local/share/verilator/include/verilated_vcd_c.cpp
+VERILATOR_INC = /home/dsheffie/local/share/verilator/include
+VERILATOR_DPI_INC = /home/dsheffie/local/share/verilator/include/vltstd/
+VERILATOR = /home/dsheffie/local/bin/verilator
+EXTRA_LD = -lcapstone
 
-ifeq ($(UNAME_S),FreeBSD)
-	CXX = CC -march=native
-	VERILATOR_SRC = /opt/local/share/verilator/include/verilated.cpp
-	VERILATOR_INC = /opt/local/share/verilator/include
-	VERILATOR_VCD = /opt/local/share/verilator/include/verilated_vcd_c.cpp
-        EXTRA_LD = -L/usr/local/lib -lcapstone -lboost_program_options  -lboost_serialization
-	MAKE = gmake
-endif
 
-ifeq ($(UNAME_S),Darwin)
-	CXX = clang++ -I/opt/local/include -flto
-	VERILATOR_SRC = /Users/dsheffie/local/share/verilator/include/verilated.cpp
-	VERILATOR_INC = /Users/dsheffie/local/share/verilator/include
-	VERILATOR_VCD = /Users/dsheffie/local/share/verilator/include/verilated_vcd_c.cpp
-	VERILATOR_DPI_INC = /Users/dsheffie/local/share/verilator/include/vltstd/
-	VERILATOR = /Users/dsheffie/local/bin/verilator
-	EXTRA_LD = -L/opt/local/lib -lboost_program_options-mt -lboost_serialization-mt -lcapstone
-endif
 
 OPT = -O3 -g -std=c++14 -fomit-frame-pointer
 CXXFLAGS = -std=c++11 -g  $(OPT) -I$(VERILATOR_INC) -I$(VERILATOR_DPI_INC) #-DLINUX_SYSCALL_EMULATION=1

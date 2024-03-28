@@ -1,8 +1,5 @@
 #include "top.hh"
 
-#ifdef USE_SDL
-#include <SDL2/SDL.h>
-#endif
 
 #define BRANCH_DEBUG 1
 #define CACHE_STATS 1
@@ -17,12 +14,11 @@ std::map<std::string, uint32_t> globals::symtab;
 char **globals::sysArgv = nullptr;
 int globals::sysArgc = 0;
 
-SDL_Window *globals::sdlwin = nullptr;
-SDL_Surface *globals::sdlscr = nullptr;
 
 static uint64_t cycle = 0;
 static uint64_t fetch_slots = 0;
 static bool trace_retirement = false;
+
 static uint64_t mem_reqs = 0;
 static state_t *s = nullptr;
 static state_t *ss = nullptr;
@@ -30,10 +26,6 @@ static uint64_t insns_retired = 0, insns_allocated = 0;
 static uint64_t cycles_in_faulted = 0, fetch_stalls = 0;
 
 static uint64_t pipestart = 0, pipeend = ~(0UL);
-
-static boost::dynamic_bitset<> touched_lines(1UL<<28);
-
-static pipeline_logger *pl = nullptr;
 
 static uint64_t l1d_misses = 0, l1d_insns = 0;
 
@@ -427,32 +419,7 @@ void record_retirement(long long pc,
   last_retire_pc = pc;
   
   
-  if((pl != nullptr) and (record_insns_retired >= pipestart) and (record_insns_retired < pipeend)) {
-    uint32_t insn = get_insn(pc, s);
-    uint32_t opcode = insn & 127;
-    auto disasm = getAsmString(insn, pc);
-    riscv_t m(insn);
-    if(opcode == 0x3 ) {
-      std::stringstream ss;
-      int32_t disp = m.l.imm11_0;
-      if((insn>>31)&1) {
-	disp |= 0xfffff000;
-      }
-      uint32_t ea = disp + pl_regs[m.l.rs1];
-      ss << std::hex << ea << std::dec;
-      disasm += " EA :  " + ss.str();
-    }
-    else if(opcode == 0x23) {
-      std::stringstream ss;
-      int32_t disp = m.s.imm4_0 | (m.s.imm11_5 << 5);
-      disp |= ((insn>>31)&1) ? 0xfffff000 : 0x0;
-      uint32_t ea = disp + pl_regs[m.s.rs1];
-      ss << std::hex << ea << std::dec;
-      disasm += " EA :  " + ss.str();
-    }
-
-    pl->append(record_insns_retired, disasm, pc, fetch_cycle, alloc_cycle, complete_cycle, retire_cycle, faulted);
-  }
+  
   ++record_insns_retired;
 }
 
@@ -492,61 +459,28 @@ static int buildArgcArgv(const char *filename, const char *sysArgs, char ***argv
 
 int main(int argc, char **argv) {
   static_assert(sizeof(itype) == 4, "itype must be 4 bytes");
-  //std::fesetround(FE_TOWARDZERO);
-  namespace po = boost::program_options; 
   // Initialize Verilators variables
-  bool enable_checker = true, use_checkpoint = false;
-  std::string sysArgs, pipelog;
-  std::string rv32_binary = "dhrystone3";
-  std::string log_name = "log.txt";
-  std::string pushout_name = "pushout.txt";
-  std::string branch_name = "branch_info.txt";
-  bool use_fb = false;
+  bool enable_checker = true;
+  std::string sysArgs;
+  std::string rv32_binary = "bbl.bin0.bin";
   uint64_t heartbeat = 1UL<<36, start_trace_at = ~0UL;
   uint64_t max_cycle = 0, max_icnt = 0, mem_lat = 2;
   uint64_t last_store_addr = 0, last_load_addr = 0, last_addr = 0;
   int misses_inflight = 0;
   std::map<uint64_t, uint64_t> pushout_histo;
   int64_t mem_reply_cycle = -1L;
-  try {
-    po::options_description desc("Options");
-    desc.add_options() 
-      ("help", "Print help messages")
-      ("args,a", po::value<std::string>(&sysArgs), "arguments to mips binary")
-      ("checker,c", po::value<bool>(&enable_checker)->default_value(true), "use checker")
-      ("isdump,d", po::value<bool>(&use_checkpoint)->default_value(false), "is a dump")
-      ("file,f", po::value<std::string>(&rv32_binary), "mips binary")
-      ("heartbeat,h", po::value<uint64_t>(&heartbeat)->default_value(1<<24), "heartbeat for stats")
-      ("log,l", po::value<std::string>(&log_name), "stats log filename")
-      ("pushout", po::value<std::string>(&pushout_name), "pushout log filename")
-      ("branch", po::value<std::string>(&branch_name), "branch log filename")
-      ("memlat,m", po::value<uint64_t>(&mem_lat)->default_value(4), "memory latency")
-      ("pipelog,p", po::value<std::string>(&pipelog), "log for pipeline tracing")
-      ("pipestart", po::value<uint64_t>(&pipestart)->default_value(0), "when to start logging")
-      ("pipeend", po::value<uint64_t>(&pipeend)->default_value(~0UL), "when to stop logging")      
-      ("maxcycle", po::value<uint64_t>(&max_cycle)->default_value(1UL<<34), "maximum cycles")
-      ("maxicnt", po::value<uint64_t>(&max_icnt)->default_value(1UL<<50), "maximum icnt")
-      ("trace,t", po::value<bool>(&trace_retirement)->default_value(false), "trace retired instruction stream")
-      ("starttrace,s", po::value<uint64_t>(&start_trace_at)->default_value(~0UL), "start tracing retired instructions")
-      ("fb", po::value<bool>(&use_fb)->default_value(false), "use an SDL framebuffer")
-      ; 
-    po::variables_map vm;
-    po::store(po::parse_command_line(argc, argv, desc), vm);
-    po::notify(vm); 
-  }
-  catch(po::error &e) {
-    std::cerr <<"command-line error : " << e.what() << "\n";
-    return -1;
-  }
+  
+  mem_lat = 4;
+  max_cycle = 1UL<<34;
+  max_icnt = 1UL<<50;
+
+  
   uint32_t max_insns_per_cycle = 4;
   uint32_t max_insns_per_cycle_hist_sz = 2*max_insns_per_cycle;
 
   std::map<uint32_t, uint64_t> mispredicts;
 
   uint64_t hist = 0, spec_hist = 0;
-  static const int TBL_SIZE = (1<<24);
-  static const int BTB_SIZE = (1<<6);
-  
   
   uint64_t inflight[32] = {0};
   uint64_t *insns_delivered = new uint64_t[max_insns_per_cycle_hist_sz];
@@ -578,42 +512,17 @@ int main(int argc, char **argv) {
   uint64_t n_branches = 0, n_mispredicts = 0, n_checks = 0, n_flush_cycles = 0;
   bool got_mem_req = false, got_mem_rsp = false, got_monitor = false, incorrect = false;
 
-#ifdef USE_SDL
-  if(use_fb) {
-    assert(SDL_Init(SDL_INIT_VIDEO) == 0);
-    globals::sdlwin = SDL_CreateWindow("FRAMEBUFFER",
-				       SDL_WINDOWPOS_UNDEFINED,
-				       SDL_WINDOWPOS_UNDEFINED,
-				       FB_WIDTH,
-				       FB_HEIGHT,
-				       SDL_WINDOW_SHOWN);
-    assert(globals::sdlwin != nullptr);
-    globals::sdlscr = SDL_GetWindowSurface(globals::sdlwin);
-    assert(globals::sdlscr);
-  }
-#endif
   
-  globals::syscall_emu = not(use_checkpoint);
-  tb->syscall_emu = globals::syscall_emu;
+  globals::syscall_emu = false;
+  tb->syscall_emu = 0;
   
-  if(use_checkpoint) {
-    loadState(*s, rv32_binary.c_str());
-    for(int i = 0; i < 32; i++) {
-      assert(s->gpr[i] == 0);
-    }
-    loadState(*ss, rv32_binary.c_str());
+  loadState(*s, rv32_binary.c_str());
+  for(int i = 0; i < 32; i++) {
+    assert(s->gpr[i] == 0);
   }
-  else {
-    load_elf(rv32_binary.c_str(), s);
-    load_elf(rv32_binary.c_str(), ss);
-  }
+  loadState(*ss, rv32_binary.c_str());
   reset_core(tb, cycle, s->pc);
 
-  
-  if(not(pipelog.empty())) {
-    pl = new pipeline_logger(pipelog);
-  }
-  
   s->pc = ss->pc;
   
   double t0 = timestamp();
@@ -1008,7 +917,6 @@ int main(int argc, char **argv) {
 	}
 	last_load_addr = tb->mem_req_addr;
 	assert((tb->mem_req_addr & 0xf) == 0);
-	touched_lines[(tb->mem_req_addr & ((1UL<<32) - 1))>>4] = 1;
 	++n_loads;
       }
       else if(tb->mem_req_opcode == 7) { /* store word */
@@ -1063,220 +971,9 @@ int main(int argc, char **argv) {
   }
   
   if(!incorrect) {
-    std::ofstream out(log_name);
-    out << "n_mispredicts = " << n_mispredicts
-	<<  ", cycles = " << cycle
-	<< ", insns = " << insns_retired
-	<< ", n_checks = " << n_checks
-	<< "\n";
-    out << static_cast<double>(insns_retired) / cycle << " insn per cycle\n";
-    double avg_inflight = 0, sum = 0;
-    for(int i = 0; i < 32; i++) {
-      if(inflight[i] == 0) continue;
-      avg_inflight += i * inflight[i];
-      sum += inflight[i];
-      //printf("inflight[%d] = %lu\n", i, inflight[i]);
-    }
-    avg_inflight /= sum;
-    out << insns_retired << " insns retired\n";
-    out << insns_allocated << " insns allocated\n";
-    out << cycles_in_faulted*2 << " slots in faulted\n";
-    out << fetch_stalls << " fetch stalls\n";
-    
-    uint64_t totalSlots = 2*cycle;
-    uint64_t badSpecSlots = insns_allocated - insns_retired + (2*cycles_in_faulted);
-    double rr = static_cast<double>(insns_retired)/totalSlots;
-    double bs = static_cast<double>(badSpecSlots) / totalSlots;
-    double fe = static_cast<double>(fetch_stalls) / totalSlots;
-    out << "top-down bb = " << (1.0 - (rr+bs+fe)) << "\n";     
-    out << "top-down rr = " << rr << "\n";
-    out << "top-down bs = " << bs << "\n";
-    out << "top-down fe = " << fe << "\n";
-										
-		              
-    //(SlotsIssued – SlotsRetired + RecoveryBubbles) / TotalSlots
-    
-    out << "avg insns in ROB = " << avg_inflight
-	      << ", max inflight = " << max_inflight << "\n";
-  
-
-    out << "l1d cache hits = " << tb->l1d_cache_hits << "\n";
-    out << "l1d cache accesses = " << tb->l1d_cache_accesses << "\n";
-    out << "l1d hit rate = "
-	      << 100.0 *(static_cast<double>(tb->l1d_cache_hits) / tb->l1d_cache_accesses)
-	      << "\n";
-    out << "l1i cache hits = " << tb->l1i_cache_hits << "\n";
-    out << "l1i cache accesses = " << tb->l1i_cache_accesses << "\n";
-    out << "l1i hit rate = "
-	      << 100.0 *(static_cast<double>(tb->l1i_cache_hits) / tb->l1i_cache_accesses)
-	      << "\n";
-
-    out << "l2 cache hits = " << tb->l2_cache_hits << "\n";
-    out << "l2 cache accesses = " << tb->l2_cache_accesses << "\n";
-
-
-    out << "branch mispredict rate = "
-	      << (static_cast<double>(n_mispredicts)/n_branches)*100.0
-	      << "\n";
-
-    out << "mispredicts per kiloinsn = "
-	      << (static_cast<double>(n_mispredicts) / insns_retired) * 1000.0
-	      << "\n";
-    out << n_flush_cycles << " cycles spent flushing caches\n";
-    out << n_loads << " cache line loads\n";
-    out << n_stores << " cache line stores\n";
-    out << l1d_misses << " l1d misses\n";
-    out << l1d_insns << " insns access the l1d\n";
-
-    uint64_t total_fetch = 0, total_fetch_cycles = 0;
-    for(int i = 0; i < 5; i++) {
-      //out << "n_fetch[" << i << "] = " << n_fetch[i] << "\n";
-      total_fetch_cycles += n_fetch[i];
-      total_fetch += n_fetch[i] * i;
-    }
-    out << "avg fetch = " << static_cast<double>(total_fetch) / total_fetch_cycles << "\n";
-    out << "resteer bubble = " << n_resteer_bubble << "\n";
-    out << "front-end queues full = " << n_fq_full << "\n";
-    out << "fetch_slots = " << fetch_slots << "\n";
-    out << "total_slots = " << (cycle*2) << "\n";
-    out << "retire_slots = " << insns_retired << "\n";
-    double total_fetch_cap = 0.0;
-
-  
-    // for(int i = 0; i < 3; i++) {
-    //   out << "uq_full[" << i << "] = " << n_uq_full[i] << "\n";
-    // }
-    uint64_t total_alloc = 0;
-    for(int i = 0; i < 3; i++) {
-      out << "alloc[" << i << "] = " << n_alloc[i] << "\n";
-      total_alloc += i*n_alloc[i];
-    }
-    out << total_alloc << " total allocated uops\n";
-    out << n_int_exec[0] << " cycles where int exec queue is not empty\n";
-    out << n_int_exec[1] << " cycles where int exec queue dispatches\n";
-    out << n_int2_exec[0] << " cycles where int2 exec queue is not empty\n";
-    out << n_int2_exec[1] << " cycles where int2 exec queue dispatches\n";    
-    out << n_mem_exec[0] << " cycles where mem exec queue is not empty\n";
-    out << n_mem_exec[1] << " cycles where mem exec queue dispatches\n";
-    out << n_mem_exec[2] << " cycles where mem exec queue is blocked by a store\n";
-
-    out << q_full[0] << " cycles with int queue full\n";
-    out << q_full[1] << " cycles with mem queue full\n";
-    out << dq_empty  << " cycles with an empty decode queue\n";
-    out << uq_full   << " cycles with a  full uop queue\n";
-    out << n_active << " cycles where the machine is in active state\n";
-    out << rob_full << " cycles where the rob is full\n";
-  
-    double avg_restart = 0.0;
-    uint64_t total_restart = 0, accum_restart = 0;
-    for(auto &p : restart_distribution) {
-      avg_restart += (p.first * p.second);
-      total_restart += p.second;
-    }
-    for(auto &p : restart_distribution) {
-      accum_restart += p.second;
-      if(accum_restart >= (total_restart/2)) {
-	out << p.first << " median flush cycles\n";
-	break;
-      }
-    }
-    if(total_restart != 0) {
-      out << avg_restart << " cycles spent in pipeline flush\n";
-      avg_restart /= total_restart;
-      out << total_restart << " times pipeline was flushed\n";
-      out << avg_restart << " cycles to flush on avg\n";
-      out << restart_distribution.begin()->first << " min cycles to flush\n";
-      out << restart_distribution.rbegin()->first << " max cycles to flush\n";
-    }
-    
-    double avg_ds_restart = 0.0;
-    uint64_t total_ds_restart = 0, accum_ds_restart = 0;
-    for(auto &p : restart_ds_distribution) {
-      avg_ds_restart += (p.first * p.second);
-      total_ds_restart += p.second;
-    }
-    for(auto &p : restart_ds_distribution) {
-      accum_ds_restart += p.second;
-      if(accum_ds_restart >= (total_ds_restart/2)) {
-	out << p.first << " median delay slot flush cycles\n";
-	break;
-      }
-    }
-    if(total_ds_restart != 0) {
-      out << avg_ds_restart << " cycles spent waiting for delay slot in flush\n";
-      avg_ds_restart /= total_ds_restart;
-      out << avg_ds_restart << " cycles waiting on delay slot on avg\n";
-      out << restart_ds_distribution.begin()->first << " min cycles for delay slot\n";
-      out << restart_ds_distribution.rbegin()->first << " max cycles for delay slot\n";
-    }
-    for(auto &p : fault_distribution) {
-      out << p.first << " faults inflight, " << p.second << " times\n";
-    }
-    for(auto &p : branch_distribution) {
-      out << p.first << " branches inflight, " << p.second << " times\n";
-    }
-    for(auto &p : fault_to_restart_distribution) {
-      out << p.first << " cycles before restart, " << p.second << " times\n";
-    }
-    dump_histo(branch_name, mispredicts, s);
-    uint64_t total_pushout = 0;
-    for(auto &p : pushout_histo) {
-      total_pushout += p.second;
-    }
-    out << total_pushout << " cycles of pushout\n";
-    dump_histo(pushout_name, pushout_histo, s);
-    
-    //std::ofstream branch_info("retire_info.csv");
-    uint64_t total_retire = 0, total_cycle = 0;
-    for(auto &p : retire_map) {
-      total_retire += p.second;
-    }
-    for(auto &p : retire_map) {
-      //branch_info << p.first << "," << p.second << "," << static_cast<double>(p.second) / total_retire << "\n";
-      total_cycle += (p.first * p.second);
-    }
-    //branch_info.close();
-    int median_int_rdy;
-    double avg_int_rdy = histo_mean_median(int_sched_rdy_map, median_int_rdy);
-    out << "avg int rdy insn = " << avg_int_rdy << "\n";
-    out << "median int rdy insn = " << median_int_rdy << "\n";
-    
-    int median_mem_lat = 0;
-    double avg_mem_lat = histo_mean_median(mem_lat_map, median_mem_lat);
-    out << "avg mem alloc to complete = " << avg_mem_lat << "\n";
-    out << "median mem alloc to complete = " << median_mem_lat << "\n";
-
-    avg_mem_lat = histo_mean_median(non_mem_lat_map, median_mem_lat);
-    out << "avg non-mem alloc to complete = " << avg_mem_lat << "\n";
-    out << "median non-mem alloc to complete = " << median_mem_lat << "\n";
-
-    avg_mem_lat = histo_mean_median(mispred_lat_map, median_mem_lat);
-    out << "avg mispred branch alloc to complete = " << avg_mem_lat << "\n";
-    out << "median mispred branch alloc to complete = " << median_mem_lat << "\n";
-    
-    out << "l1d_reqs = " << l1d_reqs << "\n";
-    out << "l1d_acks = " << l1d_acks << "\n";
-    out << "l1d_stores = " << l1d_stores << "\n";
-    out << "l1d tput = " << (static_cast<double>(l1d_acks) /l1d_reqs) << "\n";
-    
-    //for(auto &p :block_distribution) {
-    //out << p.first << "," << p.second << "\n";
-    //}
-    for(int i = 1; i < 8; i++) {
-      if(l1d_stall_reasons[i] != 0) {
-	out << l1d_stall_reasons[i] << " " << l1d_stall_str[i] << "\n";
-      }
-    }
-    std::cout << "total_retire = " << total_retire << "\n";
-    std::cout << "total_cycle  = " << total_cycle << "\n";
-    std::cout << "total ipc    = " << static_cast<double>(total_retire) / total_cycle << "\n";
-    double tip_cycles = 0.0;
-    for(auto &p : tip_map) {
-      tip_cycles += p.second;
-    }
-    std::cout << "tip cycles  = " << tip_cycles << "\n";
-    dump_histo("tip.txt", tip_map, s);    
-    out.close();
+    std::cout << "total_retire = " << insns_retired << "\n";
+    std::cout << "total_cycle  = " << cycle << "\n";
+    std::cout << "total ipc    = " << static_cast<double>(insns_retired) / cycle << "\n";
   }
   else {
     std::cout << "instructions retired = " << insns_retired << "\n";
@@ -1291,16 +988,8 @@ int main(int argc, char **argv) {
   delete s;
   delete ss;
   delete [] insns_delivered;
-  if(pl) {
-    delete pl;
-  }
+
   //delete tb;
   stopCapstone();
-#ifdef USE_SDL
-  if(globals::sdlwin) {
-    SDL_DestroyWindow(globals::sdlwin);
-    SDL_Quit();
-  }
-#endif
   exit(EXIT_SUCCESS);
 }

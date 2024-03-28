@@ -10,14 +10,6 @@
 #include <map>
 
 #include <sys/time.h>
-#include <boost/version.hpp>
-
-#if BOOST_VERSION >= 107400
-#include <boost/serialization/library_version_type.hpp>
-#endif
-
-#include <boost/program_options.hpp>
-#include <boost/dynamic_bitset.hpp>
 
 #include <sys/mman.h>
 #include <unistd.h>
@@ -33,37 +25,9 @@
 #include "globals.hh"
 #include "disassemble.hh"
 #include "saveState.hh"
-#include "pipeline_record.hh"
 
 #include "Vcore_l1d_l1i__Dpi.h"
 #include "svdpi.h"
-
-template <typename A, typename B>
-inline double histo_mean_median(const std::map<A,B> &histo, A &median) {
-  double acc = 0.0;
-  B count = 0, x = 0;
-  if(histo.size() == 0) {
-    median = 0;
-    return 0.0;
-  }
-  
-  for(const auto &p : histo) {
-    acc += (p.first * p.second);
-    count += p.second;
-  }
-
-  acc /= count;
-  for(const auto &p : histo) {
-    x += p.second;
-    if(x >= (count/2)) {
-      median = p.first;
-      break;
-    }
-  }
-  return acc;
-}
-
-
 
 union itype {
   struct {
@@ -186,26 +150,6 @@ static inline uint32_t get_insn(uint32_t pc, const state_t *s) {
   return *reinterpret_cast<uint32_t*>(&s->mem[pc]);
 }
 
-
-template<typename X, typename Y>
-static inline void dump_histo(const std::string &fname,
-			      const std::map<X,Y> &histo,
-			      const state_t *s) {
-  std::vector<std::pair<Y,X>> sorted_by_cnt;
-  for(auto &p : histo) {
-    sorted_by_cnt.emplace_back(p.second, p.first);
-  }
-  std::ofstream out(fname);
-  std::sort(sorted_by_cnt.begin(), sorted_by_cnt.end());
-  for(auto it = sorted_by_cnt.rbegin(), E = sorted_by_cnt.rend(); it != E; ++it) {
-    uint32_t r_inst = *reinterpret_cast<uint32_t*>(&s->mem[it->second]);
-    auto s = getAsmString(r_inst, it->second);
-    out << std::hex << it->second << ":"
-  	      << s << ","
-  	      << std::dec << it->first << "\n";
-  }
-  out.close();
-}
 
 static inline uint32_t to_uint32(float f) {
   return *reinterpret_cast<uint32_t*>(&f);
