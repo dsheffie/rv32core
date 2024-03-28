@@ -43,11 +43,13 @@ void loadState(state_t &s, const std::string &filename) {
     page p;
     sz = read(fd, &p, sizeof(p));
     uint64_t page_id = (p.va >> 12);
+
     if(s.mtbl[page_id] == nullptr) {
+      //printf("allocating page %d\n", page_id);
       s.mtbl[page_id] = new uint8_t[4096];
     }
     assert(sz == sizeof(p));
-    memcpy(&(s.mtbl[page_id]), p.data, 4096);
+    memcpy(s.mtbl[page_id], p.data, 4096);
   }
   close(fd);
 }

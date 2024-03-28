@@ -28,7 +28,7 @@ EXE = rv64_core.js
 all: $(EXE)
 
 $(EXE) : $(OBJ) obj_dir/Vcore_l1d_l1i__ALL.a
-	$(CXX) $(CXXFLAGS) $(OBJ) obj_dir/*.o $(LIBS) -o $(EXE) --preload-file bbl.bin0.bin
+	$(CXX) $(CXXFLAGS) $(OBJ) obj_dir/*.o $(LIBS) -o $(EXE) --preload-file bbl.bin0.bin -s TOTAL_MEMORY=512MB
 
 top.o: top.cc obj_dir/Vcore_l1d_l1i__ALL.a
 	$(CXX) -MMD $(CXXFLAGS) -Iobj_dir -c $< 

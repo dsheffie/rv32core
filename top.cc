@@ -17,20 +17,16 @@ int globals::sysArgc = 0;
 
 static uint64_t cycle = 0;
 static uint64_t fetch_slots = 0;
-static bool trace_retirement = true;
+static bool trace_retirement = false;
 
 static uint64_t mem_reqs = 0;
 static state_t *s = nullptr;
 static uint64_t insns_retired = 0, insns_allocated = 0;
 static uint64_t cycles_in_faulted = 0, fetch_stalls = 0;
 
-static uint64_t pipestart = 0, pipeend = ~(0UL);
-
 static uint64_t l1d_misses = 0, l1d_insns = 0;
 
 static uint64_t last_retire_cycle = 0, last_retire_pc  = 0;
-
-static std::map<uint64_t, uint64_t> retire_map;
 
 static uint64_t n_fetch[5] = {0};
 static uint64_t n_resteer_bubble = 0;
@@ -61,10 +57,15 @@ void csr_putchar(char c) {
 
 uint8_t *gptr(long long pa) {
   int pid = pa >> 12;
+  //printf("page %d getting accessed\n", pid);
   if(s->mtbl[pid] == nullptr) {
+    //printf("creating page %d\n", pid);
     s->mtbl[pid] = new uint8_t[4096];
   }
-  return s->mtbl[pid] + (pa & 4095);
+  assert(s->mtbl[pid] != nullptr);
+  uint8_t *ptr = s->mtbl[pid] + (pa & 4095);
+  //if(pa != 0) printf("base %p, ptr = %p\n", s->mtbl[pid], ptr);
+  return ptr;
 }
 
 long long translate(long long va, long long root, bool iside, bool store) {
@@ -214,14 +215,14 @@ void initState(state_t *s) {
   s->misa = 0x8000000000141101L;
   s->priv = priv_machine;
   s->mstatus = ((uint64_t)2 << MSTATUS_UXL_SHIFT) |((uint64_t)2 << MSTATUS_SXL_SHIFT);
-
+  memset(s->mtbl, 0, sizeof(s->mtbl));
 }
 static uint64_t record_insns_retired = 0;
 
 
 int main(int argc, char **argv) {
   std::string rv32_binary = "bbl.bin0.bin";
-  uint64_t heartbeat = 1ULL<<36, start_trace_at = ~0ULL;
+  uint64_t heartbeat = 1ULL<<24;
   uint64_t max_cycle = 0, max_icnt = 0, mem_lat = 2;
   uint64_t last_store_addr = 0, last_load_addr = 0, last_addr = 0;
   int misses_inflight = 0;
