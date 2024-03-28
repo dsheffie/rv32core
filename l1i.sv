@@ -3,10 +3,6 @@
 `include "uop.vh"
 
 `ifdef VERILATOR
-import "DPI-C" function void record_fetch(int push1, int push2, int push3, int push4,
-					  longint pc0, longint pc1, longint pc2, longint pc3,
-					  int bubble, int fq_full);
-
 import "DPI-C" function longint ic_translate(longint va, longint root);
 `endif
 
@@ -1000,26 +996,6 @@ endfunction
 			 n_cache_pc;
      end
    
-`ifdef VERILATOR
-   always_ff@(negedge clk)
-     begin
-	//$display("fe in state %d at cycle %d", r_state, r_cycle);
-	//$display("%b %b %b %b", t_push_insn, t_push_insn2, t_push_insn3, t_push_insn4);
-	record_fetch(t_push_insn ? 32'd1 : 32'd0,
-		     t_push_insn2 ? 32'd1 : 32'd0,
-		     t_push_insn3 ? 32'd1 : 32'd0,
-		     t_push_insn4 ? 32'd1 : 32'd0,
-		     { {(64-`M_WIDTH){1'b0}},t_insn.pc},
-		     { {(64-`M_WIDTH){1'b0}},t_insn2.pc},
-		     { {(64-`M_WIDTH){1'b0}},t_insn3.pc},
-		     { {(64-`M_WIDTH){1'b0}},t_insn4.pc},		     
-		     r_resteer_bubble ? 32'd1 : 32'd0,
-		     fq_full ? 32'd1 : 32'd0);
-	
-	
-     end
-`endif
-	  
 
    ram2r1w #(.WIDTH(2), .LG_DEPTH(`LG_PHT_SZ) ) pht
      (

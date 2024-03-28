@@ -4,22 +4,6 @@
 `ifdef VERILATOR
 import "DPI-C" function void csr_putchar(input byte x);
 import "DPI-C" function longint csr_gettime();
-
-import "DPI-C" function void report_exec(input int int_valid, 
-					 input int int_blocked,
-					 input int int2_valid, 
-					 input int int2_blocked, 
-					 input int mem_valid, 
-					 input int mem_blocked,
-					 input int fp_valid, 
-					 input int fp_blocked,
-					 input int iq_full,
-					 input int mq_full,
-					 input int fq_full,
-					 input int blocked_by_store,
-					 input int int_ready,
-					 input int int_ready2
-					 );
 `endif
 
 module exec(clk, 
@@ -1712,32 +1696,6 @@ module exec(clk,
 	       end	     
 	  end
      end // always_ff@ (posedge clk)
-   
-   
-
-   
-`ifdef VERILATOR
-   always_ff@(negedge clk)
-     begin
-	report_exec(t_uq_empty ? 32'd0 : 32'd1,
-		    t_pop_uq ? 32'd1 : 32'd0,
-		    !t_uq_next_empty & t_pop_uq & uq2.is_cheap_int ? 32'd1 : 32'd0,
-		    t_pop_uq2 ? 32'd1 : 32'd0,
-		    t_mem_uq_empty ? 32'd0 : 32'd1,
-		    t_pop_mem_uq ? 32'd1 : 32'd0,
-		    32'd1,
-		    32'd0,
-		    t_uq_full ? 32'd1 : 32'd0,
-		    t_mem_uq_full ? 32'd1 : 32'd0,
-		    32'd0,
-		    32'd0,
-		    {{(32-N_INT_SCHED_ENTRIES){1'b0}}, t_alu_entry_rdy},
-		    {{(32-N_INT_SCHED_ENTRIES){1'b0}}, t_alu_entry_rdy2}
-		    );
-     end
-`endif //  `ifdef VERILATOR
-
-   
    wire [`M_WIDTH-1:0] w_pc4;
    wire [`M_WIDTH-1:0] w_indirect_target;
    mwidth_add add2 (.A(t_srcA), .B(int_uop.rvimm), .Y(w_indirect_target));
