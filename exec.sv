@@ -4,6 +4,7 @@
 `ifdef VERILATOR
 import "DPI-C" function void csr_putchar(input byte x);
 import "DPI-C" function longint csr_gettime();
+import "DPI-C" function void terminate();
 `endif
 
 module exec(clk, 
@@ -2419,8 +2420,8 @@ module exec(clk,
 	  begin
 	     if(t_delegate)
 	       begin
-		  $display("delegate cause %x, tval %x, epc %x",
-			   cause, tval, epc);
+		  //$display("delegate cause %x, tval %x, epc %x",
+		  //	   cause, tval, epc);
 		  r_scause <= cause;
 		  r_stval <= tval;
 		  r_sepc <= epc;
@@ -2502,6 +2503,7 @@ module exec(clk,
 		 csr_putchar(t_wr_csr[7:0]);
 	       RDFAULTEDBRANCH_CSR:
 		 begin
+		    terminate();
 		 end
 	       default:
 		 begin

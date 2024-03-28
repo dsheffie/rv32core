@@ -16,7 +16,7 @@ int globals::sysArgc = 0;
 
 
 static uint64_t cycle = 0;
-static bool trace_retirement = true;
+static bool trace_retirement = false;
 
 static uint64_t mem_reqs = 0;
 static state_t *s = nullptr;
@@ -27,6 +27,11 @@ static uint64_t last_retire_cycle = 0, last_retire_pc  = 0;
 static bool pending_fault = false;
 static uint64_t fault_start_cycle = 0;
 static bool verbose_ic_translate = false;
+
+bool done = false;
+void terminate() {
+  done = true;
+}
 
 void csr_putchar(char c) {
   if(c==0) std::cout << "\n";
@@ -247,7 +252,7 @@ int main(int argc, char **argv) {
   reset_core(tb, cycle, s->pc);
   
   double t0 = timestamp();
-  while(!Verilated::gotFinish() && (cycle < max_cycle) && (insns_retired < max_icnt)) {
+  while(!Verilated::gotFinish() && not(done)) {
     contextp->timeInc(1);  // 1 timeprecision periodd passes...    
 
     tb->clk = 1;
