@@ -16,36 +16,14 @@ int globals::sysArgc = 0;
 
 
 static uint64_t cycle = 0;
-static uint64_t fetch_slots = 0;
-static bool trace_retirement = false;
+static bool trace_retirement = true;
 
 static uint64_t mem_reqs = 0;
 static state_t *s = nullptr;
 static uint64_t insns_retired = 0, insns_allocated = 0;
 static uint64_t cycles_in_faulted = 0, fetch_stalls = 0;
 
-static uint64_t l1d_misses = 0, l1d_insns = 0;
-
 static uint64_t last_retire_cycle = 0, last_retire_pc  = 0;
-
-static uint64_t n_fetch[5] = {0};
-static uint64_t n_resteer_bubble = 0;
-static uint64_t n_fq_full = 0;
-
-static uint64_t n_uq_full[3] = {0};
-static uint64_t n_alloc[3] = {0};
-static uint64_t n_rdy[3] = {0};
-
-static uint64_t n_int_exec[2] = {0};
-static uint64_t n_int2_exec[2] = {0};
-static uint64_t n_mem_exec[3] = {0};
-
-static uint64_t q_full[3] = {0};
-static uint64_t dq_empty =  0;
-static uint64_t uq_full = 0;
-static uint64_t n_active = 0;
-static uint64_t rob_full = 0;
-
 static bool pending_fault = false;
 static uint64_t fault_start_cycle = 0;
 static bool verbose_ic_translate = false;
@@ -74,7 +52,7 @@ long long translate(long long va, long long root, bool iside, bool store) {
   a = root + (((va >> 30) & 511)*8);
   u = *reinterpret_cast<int64_t*>(gptr(a));
   if((u & 1) == 0) {
-    return (~0UL);
+    return (~0ULL);
   }
   if((u>>1)&7) {
     mask_bits = 30;
@@ -88,7 +66,7 @@ long long translate(long long va, long long root, bool iside, bool store) {
   if((u & 1) == 0) {
     if(verbose_ic_translate)
       printf("failed translation for %llx at level 2\n", va);
-    return (~0UL);
+    return (~0ULL);
   }
   if((u>>1)&7) {
     mask_bits = 21;
@@ -102,7 +80,7 @@ long long translate(long long va, long long root, bool iside, bool store) {
   if((u & 1) == 0) {
     if(verbose_ic_translate)
       printf("failed translation for %llx at level 1\n", va);
-    return (~0UL);
+    return (~0ULL);
   }
   assert((u>>1)&7);
   mask_bits = 12;
@@ -125,7 +103,6 @@ long long translate(long long va, long long root, bool iside, bool store) {
   
   u = ((u >> 10) & ((static_cast<uint64_t>(1UL)<<44)-1)) * 4096;
   uint64_t pa = (u&(~m)) | (va & m);
-  //printf("translation complete, pa %lx!\n", pa);
   //exit(-1);
   return pa;
 }
