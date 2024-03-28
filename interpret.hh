@@ -61,7 +61,7 @@ struct state_t{
   uint64_t last_pc;
   uint64_t last_call;
   int64_t gpr[32];
-  uint8_t *mem;
+  uint8_t *mtbl[1<<20];
   uint8_t brk;
   uint8_t bad_addr;
   uint64_t epc;

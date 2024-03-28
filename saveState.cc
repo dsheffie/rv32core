@@ -33,54 +33,22 @@ void loadState(state_t &s, const std::string &filename) {
   assert(fd != -1);
   size_t sz = read(fd, &h, sizeof(h));
   assert(sz == sizeof(h));
-  //std::cout << "got magic number of " << std::hex << h.magic << std::dec << "\n";
-  //std::cout << "got pc of " << std::hex << h.pc << std::dec << "\n";
-  //assert(h.magic == MAGICNUM);
+
   s.pc = h.pc;
   memcpy(&s.gpr,&h.gpr,sizeof(s.gpr));
   s.icnt = h.icnt;
-  globals::tohost_addr = h.tohost_addr;
-  globals::fromhost_addr = h.fromhost_addr;
+
+  
   for(uint32_t i = 0; i < h.num_nz_pages; i++) {
     page p;
     sz = read(fd, &p, sizeof(p));
-    //std::cout << "sz = " << sz << "\n";
+    uint64_t page_id = (p.va >> 12);
+    if(s.mtbl[page_id] == nullptr) {
+      s.mtbl[page_id] = new uint8_t[4096];
+    }
     assert(sz == sizeof(p));
-    memcpy(s.mem+p.va, p.data, 4096);
+    memcpy(&(s.mtbl[page_id]), p.data, 4096);
   }
   close(fd);
 }
 
-static void emitGprValue(state_t &s, uint64_t &pc, int i, uint64_t u) {
-  int addi = 0, slli = 0;
-  slli = ((8) << 20) | (i<<15) | 1 << 12 | (i<<7) | 0x13;
-  for(int j = 56; j >= 0; j-=8) {
-    uint8_t v = (u>>j) & 0x0ff;
-    if(v) {
-      addi = ((v) << 20) | (i<<15) | 0 << 12 | (i<<7) | 0x13;
-      *reinterpret_cast<int*>(&s.mem[pc]) = addi;
-      pc += 4;	
-    }
-    
-    if(j != 0) {
-      *reinterpret_cast<int*>(&s.mem[pc]) = slli;
-      pc += 4;
-    }
-  }  
-}
-
-
-void emitCodeForInitialRegisterValues(state_t &s, uint64_t pc) {
-
-  for(int i = 1; i < 32; i++) {
-    uint64_t u = *reinterpret_cast<uint64_t*>(&s.gpr[i]);
-    emitGprValue(s, pc, i, u);
-  }
-  
-  *reinterpret_cast<int*>(&s.mem[pc]) = 0x73;
-  pc += 4;
-  for(int i = 0; i < 128; i++) {
-    *reinterpret_cast<int*>(&s.mem[pc]) = 0x13;
-    pc += 4;
-  }
-}
