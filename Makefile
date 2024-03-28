@@ -4,14 +4,14 @@ OBJ = top.o verilated.o verilated_vcd_c.o loadelf.o interpret.o disassemble.o he
 
 SV_SRC = core_l1d_l1i.sv core.sv exec.sv decode_riscv.sv shiftregbit.sv shift_right.sv mul.sv find_first_set.sv divider.sv l1d.sv l1i.sv machine.vh rob.vh uop.vh ram1r1w.sv ram2r1w.sv popcount.sv count_leading_zeros.sv fair_sched.sv ppa32.sv ppa64.sv csa.sv rf6r3w.sv reg_ram1rw.sv perfect_l1d.sv l2.sv mwidth_add.sv addsub.sv
 
-CXX = clang++-13 -flto
+CXX = em++
 MAKE = make
 VERILATOR_SRC = /home/dsheffie/local/share/verilator/include/verilated.cpp
 VERILATOR_VCD = /home/dsheffie/local/share/verilator/include/verilated_vcd_c.cpp
 VERILATOR_INC = /home/dsheffie/local/share/verilator/include
 VERILATOR_DPI_INC = /home/dsheffie/local/share/verilator/include/vltstd/
 VERILATOR = /home/dsheffie/local/bin/verilator
-EXTRA_LD = -lcapstone
+EXTRA_LD = 
 
 
 
@@ -21,14 +21,14 @@ LIBS =  $(EXTRA_LD) -lpthread
 
 DEP = $(OBJ:.o=.d)
 
-EXE = rv64_core
+EXE = rv64_core.js
 
 .PHONY : all clean
 
 all: $(EXE)
 
 $(EXE) : $(OBJ) obj_dir/Vcore_l1d_l1i__ALL.a
-	$(CXX) $(CXXFLAGS) $(OBJ) obj_dir/*.o $(LIBS) -o $(EXE)
+	$(CXX) $(CXXFLAGS) $(OBJ) obj_dir/*.o $(LIBS) -o $(EXE) --preload-file bbl.bin0.bin
 
 top.o: top.cc obj_dir/Vcore_l1d_l1i__ALL.a
 	$(CXX) -MMD $(CXXFLAGS) -Iobj_dir -c $< 
@@ -44,14 +44,9 @@ verilated_vcd_c.o: $(VERILATOR_VCD)
 
 obj_dir/Vcore_l1d_l1i__ALL.a : $(SV_SRC)
 	$(VERILATOR) -cc core_l1d_l1i.sv
-	$(MAKE) OPT_FAST="-O3 -flto" -C obj_dir -f Vcore_l1d_l1i.mk
-
-gen_html : gen_html.cc pipeline_record.hh
-	$(CXX) -MMD $(CXXFLAGS) gen_html.cc $(LIBS) -o gen_html
+	$(MAKE) OPT_FAST="-O3" CXX="em++" -C obj_dir -f Vcore_l1d_l1i.mk
 
 -include $(DEP)
-
-
 
 clean:
 	rm -rf $(EXE) $(OBJ) $(DEP) obj_dir

@@ -8,7 +8,6 @@
 #include <array>
 #include <map>
 #include <string>
-#include <capstone/capstone.h>
 
 #include "disassemble.hh"
 
@@ -37,52 +36,13 @@ const std::string &getGPRName(uint32_t r) {
 void disassemble(std::ostream &out, uint32_t inst, uint32_t addr) {
   out << getAsmString(inst,addr);
 }
-
-
-static const std::map<cs_err, std::string> cs_error_map =
-  {
-   {CS_ERR_OK,"CS_ERR_OK"},
-   {CS_ERR_MEM,"CS_ERR_MEM"},
-   {CS_ERR_ARCH,"CS_ERR_ARCH"},
-   {CS_ERR_HANDLE,"CS_ERR_HANDLE"},
-   {CS_ERR_CSH,"CS_ERR_CSH"},
-   {CS_ERR_MODE,"CS_ERR_MODE"},
-   {CS_ERR_DETAIL,"CS_ERR_DETAIL"},
-   {CS_ERR_MEMSETUP,"CS_ERR_MEMSETUP"},
-   {CS_ERR_VERSION,"CS_ERR_VERSION"},
-   {CS_ERR_DIET,"CS_ERR_DIET"},
-   {CS_ERR_SKIPDATA,"CS_ERR_SKIPDATA"},
-   {CS_ERR_X86_ATT,"CS_ERR_X86_ATT"},
-   {CS_ERR_X86_INTEL,"CS_ERR_X86_INTEL"},               
-  };
-
-static csh handle;
-
-void initCapstone() {
-  cs_err C = cs_open(CS_ARCH_RISCV, CS_MODE_RISCV64, &handle);
-  if(C != CS_ERR_OK) {
-    std::cerr << "capstone error : " << cs_error_map.at(C) << "\n";
-    exit(-1);
-  }
-}
+void initCapstone() {}
 
 void stopCapstone() {
-  cs_close(&handle);
 }
 
 std::string getAsmString(uint32_t inst, uint32_t addr) {
-  std::stringstream ss;
-
-  cs_insn *insn = nullptr;
-
-  size_t count = cs_disasm(handle,reinterpret_cast<const uint8_t *>(&inst),
-			   sizeof(inst), addr, 0, &insn);
-  if(count != 1) {
-    return "huh?";
-  }
-  ss << insn[0].mnemonic << " " << insn[0].op_str;
-  cs_free(insn, count);
-  return ss.str();
+  return "huh";
 }
 
 

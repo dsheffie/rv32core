@@ -11,8 +11,7 @@ import "DPI-C" function void write_byte(input longint addr, input byte data, inp
 import "DPI-C" function void write_half(input longint addr, input shortint  data, input longint root);
 import "DPI-C" function void write_word(input longint addr, input int data, input longint root, int id);
 import "DPI-C" function void write_dword(input longint addr, input longint data, input longint root, int id);
-import "DPI-C" function longint dc_ld_translate(longint va, longint root );
-import "DPI-C" function longint dc_st_translate(longint va, longint root );
+import "DPI-C" function longint dc_translate(longint va, longint root, int mark_dirty );
 `endif
 
 module perfect_l1d(clk, 
@@ -633,7 +632,8 @@ module perfect_l1d(clk,
 	t_rsp_dst_valid2 = 1'b0;
 	t_rsp_data2 = 'd0;
 
-	t_pa2 = dc_ld_translate({r_req2.addr[63:12], 12'd0}, page_table_root);
+	t_pa2 = dc_translate({r_req2.addr[63:12], 12'd0}, page_table_root, 
+			     r_req2.is_store|r_req2.is_atomic ? 32'd1 : 32'd0);
 	t_req2_addr_pa = paging_active ? t_pa2 : {r_req2.addr[63:12], 12'd0};
 	t_pf2 = paging_active & (&t_req2_addr_pa);
 	
@@ -810,7 +810,7 @@ module perfect_l1d(clk,
    always_comb
      begin
 	t_data = 'd0;
-	t_pa = dc_ld_translate({r_req.addr[63:12], 12'd0}, page_table_root);
+	t_pa = dc_translate({r_req.addr[63:12], 12'd0}, page_table_root, 32'd0);
 	t_req_addr_pa = paging_active ? t_pa : {r_req.addr[63:12], 12'd0};
 	t_pf = paging_active & (&t_req_addr_pa);
 	

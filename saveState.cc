@@ -1,4 +1,3 @@
-#include <boost/dynamic_bitset.hpp>
 #include <cstdint>
 #include <cassert>
 #include <cstring>
@@ -26,42 +25,7 @@ struct header {
   header() {}
 } __attribute__((packed));
 
-void dumpState(const state_t &s, const std::string &filename) {
-  static const int n_pages = 1<<20;
-  header h;
-  boost::dynamic_bitset<> nz_pages(n_pages,false);
-  uint64_t *mem64 = reinterpret_cast<uint64_t*>(s.mem);
-  static_assert(sizeof(page)==4100, "struct page has weird size");
-  
-  /* mark non-zero pages */
-  for(int p = 0; p < n_pages; p++) {
-    for(int pp = 0; pp < 512; pp++) {
-      if(mem64[p*512+pp]) {
-	nz_pages[p] = true;
-	break;
-      }
-    }
-  }
-  int fd = ::open(filename.c_str(), O_RDWR|O_CREAT|O_TRUNC, 0600);
-  assert(fd != -1);
-  h.magic = MAGICNUM;
-  h.pc = s.pc;
-  memcpy(&h.gpr,&s.gpr,sizeof(s.gpr));
-  h.icnt = s.icnt;
-  h.num_nz_pages = nz_pages.count();
-  ssize_t wb = write(fd, &h, sizeof(h));
-  assert(wb == sizeof(h));
-
-  for(size_t i = nz_pages.find_first(); i != boost::dynamic_bitset<>::npos;
-      i = nz_pages.find_next(i)) {
-    page p;
-    p.va = i*4096;
-    memcpy(p.data, s.mem+p.va, 4096);
-    wb = write(fd, &p, sizeof(p));
-    assert(wb == sizeof(p));
-  }
-  close(fd);
-}
+void dumpState(const state_t &s, const std::string &filename) {}
 
 void loadState(state_t &s, const std::string &filename) {
   header h;

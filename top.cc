@@ -130,8 +130,8 @@ long long ic_translate(long long va, long long root) {
   return pa;
 }
 
-long long dc_ld_translate(long long va, long long root) {
-  return translate(va,root, false, false);
+long long dc_translate(long long va, long long root, int mark_dirty) {
+  return translate(va,root, false, mark_dirty);
 }
 
 uint64_t csr_time = 0;
