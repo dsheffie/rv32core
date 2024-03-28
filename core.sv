@@ -2,39 +2,6 @@
 `include "rob.vh"
 `include "uop.vh"
 
-`ifdef VERILATOR
-import "DPI-C" function void record_faults(input int n_faults);
-import "DPI-C" function void record_branches(input int n_branches);
-
-
-import "DPI-C" function void record_alloc(input int rob_full,
-					  input int alloc_one, 
-					  input int alloc_two,
-					  input int dq_empty,
-					  input int uq_full,
-					  input int uq_next_full,
-					  input int one_insn_avail,
-					  input int two_insn_avail,
-					  input int active);
-
-import "DPI-C" function void record_retirement(input longint pc,
-					       input longint fetch_cycle,
-					       input longint alloc_cycle,
-					       input longint complete_cycle,
-					       input longint retire_cycle,
-					       input int     retire_val,
-					       input int     retire_ptr,
-					       input longint retire_data,
-					       input int     fault,
-					       input int     br_mispredict);
-
-import "DPI-C" function void record_restart(input int restart_cycles);
-import "DPI-C" function void record_ds_restart(input int delay_cycles);
-import "DPI-C" function int check_insn_bytes(input longint pc, input int data);
-
-
-`endif
-
 module core(clk, 
 	    reset,
 	    syscall_emu,
@@ -644,89 +611,7 @@ module core(clk,
 	     retired_rob_ptr_two <= r_rob_next_head_ptr[`LG_ROB_ENTRIES-1:0];
    	  end
      end
-`ifdef ENABLE_CYCLE_ACCOUNTING
-   always_ff@(negedge clk)
-     begin
-	record_alloc(t_rob_full ? 32'd1 : 32'd0,
-		     t_alloc ? 32'd1 : 32'd0,
-		     t_alloc_two ? 32'd1 : 32'd0,
-		     t_dq_empty ? 32'd1 : 32'd0,
-		     
-		     t_uq_full ? 32'd1 : 32'd0,
-		     t_uq_next_full ? 32'd1 : 32'd0,
-		     
-		     t_dq_empty ? 32'd0 : 32'd1,
-		     !t_dq_next_empty && !t_dq_empty ? 32'd1 : 32'd0,
-		     t_possible_to_alloc ? 32'd1 : 32'd0);
-			    
-   	if(t_retire)
-   	  begin
-	     record_retirement(
-			       { {(64-`M_WIDTH){1'b0}},t_rob_head.pc},
-   			       t_rob_head.fetch_cycle,
-   			       t_rob_head.alloc_cycle,
-   			       t_rob_head.complete_cycle,
-   			       r_cycle,
-			       t_rob_head.valid_dst ? 32'd1 : 32'd0,
-			       {27'd0, t_rob_head.ldst},
-			       {{(64-`M_WIDTH){1'b0}},t_rob_head.data},
-			       t_rob_head.faulted ? 32'd1 : 32'd0,
-			       t_rob_head.faulted ? 32'd1 : 32'd0			       
-			       );
-   	  end
-   	if(t_retire_two)
-   	  begin
-	     record_retirement(
-			       { {(64-`M_WIDTH){1'b0}},t_rob_next_head.pc},
-   			       t_rob_next_head.fetch_cycle,
-   			       t_rob_next_head.alloc_cycle,
-   			       t_rob_next_head.complete_cycle,
-   			       r_cycle,
-			       t_rob_next_head.valid_dst ? 32'd1 : 32'd0,
-			       {27'd0, t_rob_next_head.ldst},
-			       {{(64-`M_WIDTH){1'b0}},t_rob_next_head.data},			       
-			       t_rob_next_head.faulted ? 32'd1 : 32'd0,
-			       32'd0);	     
-   	  end // if (t_retire_two)
-	if(r_state == RAT && n_state == ACTIVE)
-	  begin
-	     record_restart(r_restart_cycles);
-	  end
-	if(r_state == DRAIN && n_state == RAT)
-	  begin
-	     record_ds_restart(r_restart_cycles);
-	  end
-	    
-     end // always_ff@ (negedge clk)
-`endif
    
-   
-//`define DEBUG
-`ifdef VERILATOR
-   logic [31:0] t_faults, t_branches;
-   always_comb
-     begin
-	t_faults = 'd0;
-	t_branches = 'd0;
-	for(logic [`LG_ROB_ENTRIES:0] i = r_rob_head_ptr; i != (r_rob_tail_ptr); i=i+1)
-	  begin
-	     if(r_rob_complete[i[`LG_ROB_ENTRIES-1:0]]  && r_rob[i[`LG_ROB_ENTRIES-1:0]].faulted)
-	       begin
-		  t_faults = t_faults + 'd1;
-	       end
-	     if(r_rob[i[`LG_ROB_ENTRIES-1:0]].is_br && r_rob_complete[i[`LG_ROB_ENTRIES-1:0]])
-	       begin
-		  t_branches = t_branches + 'd1;
-	       end
-	  end
-     end // always_comb
-   
-   always_ff@(negedge clk)
-     begin
-	record_faults(t_faults);
-	record_branches(t_branches);
-     end
-`endif
    
 //`define DUMP_ROB
 `ifdef DUMP_ROB

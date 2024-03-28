@@ -4,19 +4,6 @@
 
 //`define VERBOSE_L1D 1
 
-`ifdef VERILATOR
-import "DPI-C" function void record_l1d(input int req, 
-					input int ack,
-					input int ack_st,
-					input int block,
-					input int stall_reason);
-
-import "DPI-C" function void record_miss(input int pc,
-					 input int hit_cache,
-					 input int busy);
-
-//import "DPI-C" function longint translate(longint pa);
-`endif
 
 module l1d(clk, 
 	   reset,
@@ -1491,21 +1478,7 @@ module l1d(clk,
 	  end // if (core_mem_req_valid && !core_mem_req_ack)
      end // always_comb
    
-   // always_ff@(negedge clk)
-   //   begin
-   // 	record_l1d(core_mem_req_valid ? 32'd1 : 32'd0,
-   // 		   core_mem_req_ack & core_mem_req_valid ? 32'd1 : 32'd0,
-   // 		   core_mem_req_ack & core_mem_req_valid & core_mem_req.is_store ? 32'd1 : 32'd0,		   
-   // 		   {{32-N_MQ_ENTRIES{1'b0}},r_hit_busy_addrs},
-   // 		   t_stall_reason);
 
-   // 	if(t_push_miss && (r_req2.is_store == 1'b0))
-   // 	  begin
-   // 	     record_miss(r_req2.pc, 
-   // 			 t_port2_hit_cache ? 32'd1 : 32'd0,
-   // 			 r_hit_busy_addr2 ? 32'd1 : 32'd0);
-   // 	  end // if (t_push_miss && (r_req2.is_store == 1'b0))
-   //   end
 `endif
     
 endmodule // l1d

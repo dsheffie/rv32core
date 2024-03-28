@@ -51,70 +51,8 @@ static uint64_t uq_full = 0;
 static uint64_t n_active = 0;
 static uint64_t rob_full = 0;
 
-static uint64_t l1d_reqs = 0;
-static uint64_t l1d_acks = 0;
-static uint64_t l1d_stores = 0;
-
-static std::map<int,uint64_t> block_distribution;
-static std::map<int,uint64_t> restart_distribution;
-static std::map<int,uint64_t> restart_ds_distribution;
-static std::map<int,uint64_t> fault_distribution;
-static std::map<int,uint64_t> branch_distribution;
-static std::map<int,uint64_t> fault_to_restart_distribution;
-
-static const char* l1d_stall_str[8] =
-  {
-   "no stall", //0
-   "got miss", //1 
-   "full memory queue", //2
-   "not possible", //3
-   "load retry", //4
-   "store to same set", //5
-   "cm block stall", //6
-   "inflight rob ptr", //7
-};
-static uint64_t l1d_stall_reasons[8] = {0};
-
 static bool pending_fault = false;
 static uint64_t fault_start_cycle = 0;
-
-void record_branches(int n_branches) {
-  branch_distribution[n_branches]++;
-}
-
-void record_faults(int n_faults) {
-  fault_distribution[n_faults]++;
-  if(n_faults && not(pending_fault)) {
-    pending_fault = true;
-    fault_start_cycle = cycle;
-  }
-}
-
-void record_restart(int cycles) {
-  restart_distribution[cycles]++;
-  pending_fault = false;
-
-  fault_to_restart_distribution[(cycle - fault_start_cycle)]++;
-  fault_start_cycle = 0;
-  //std::cout << "clearing fault took "
-  //<< (cycle - fault_start_cycle)
-  //<< " cycles\n";
-}
-
-void record_ds_restart(int cycles) {
-  restart_ds_distribution[cycles]++;
-}
-
-
-
-void record_l1d(int req, int ack, int ack_st, int blocked, int stall_reason) {
-  l1d_reqs += req;
-  l1d_acks += ack;
-  l1d_stores += ack_st;
-  block_distribution[__builtin_popcount(blocked)]++;
-  l1d_stall_reasons[stall_reason&15]++;
-}
-
 static bool verbose_ic_translate = false;
 
 void csr_putchar(char c) {
@@ -364,104 +302,13 @@ void record_fetch(int p1, int p2, int p3, int p4,
     ++n_fetch[0];
 }
 
-static std::map<int, uint64_t> mem_lat_map, fp_lat_map, non_mem_lat_map, mispred_lat_map;
-static std::map<int64_t, double> tip_map;
-
-int check_insn_bytes(long long pc, int data) {
-  uint32_t insn = get_insn(pc, s);
-  return (*reinterpret_cast<uint32_t*>(&data)) == insn;
-}
-
 static long long lrc = -1;
 static uint64_t record_insns_retired = 0;
 
 static int pl_regs[32] = {0};
 
-
-void record_retirement(long long pc,
-		       long long fetch_cycle,
-		       long long alloc_cycle,
-		       long long complete_cycle,
-		       long long retire_cycle,
-		       int retire_reg_val,
-		       int retire_reg_ptr,
-		       long long retire_reg_data,
-		       int faulted ,
-		       int br_mispredict) {
-
-  uint32_t insn = get_insn(pc, s);
-  uint64_t delta = retire_cycle - last_retire_cycle;
-
-  if(retire_reg_val) {
-    pl_regs[retire_reg_ptr & 31] = retire_reg_data;
-  }
-  
-  if(retire_cycle < lrc) {
-    std::cout << "retirement cycle out-of-order\n";
-    std::cout << "lrc = " << lrc << "\n";
-    std::cout << "retire_cycle = " << retire_cycle << "\n";
-    exit(-1);
-  }
-  lrc = retire_cycle;
-
-  if(br_mispredict) {
-    //long long t = retire_cycle - alloc_cycle;
-    //long long tt = retire_cycle - fetch_cycle;
-    //std::cout << "mispredict at " << std::hex << pc << std::dec << " took " << t
-    //<< " cycles from alloc to retire and "
-    //<< tt << " cycles from fetch to retire\n";
-    mispred_lat_map[complete_cycle-alloc_cycle]++;
-  }
-  
-  retire_map[delta]++;
-  
-  last_retire_cycle = retire_cycle;
-  last_retire_pc = pc;
-  
-  
-  
-  ++record_insns_retired;
-}
-
-
-static int buildArgcArgv(const char *filename, const char *sysArgs, char ***argv) {
-  int cnt = 0;
-  std::vector<std::string> args;
-  char **largs = 0;
-  args.push_back(std::string(filename));
-
-  char *ptr = nullptr, *sa = nullptr;
-  if(sysArgs) {
-    sa = strdup(sysArgs);
-    ptr = strtok(sa, " ");
-  }
-
-  while(ptr && (cnt<MARGS)) {
-    args.push_back(std::string(ptr));
-    ptr = strtok(nullptr, " ");
-    cnt++;
-  }
-  largs = new char*[args.size()];
-  for(size_t i = 0; i < args.size(); i++) {
-    std::string s = args[i];
-    size_t l = strlen(s.c_str());
-    largs[i] = new char[l+1];
-    memset(largs[i],0,sizeof(char)*(l+1));
-    memcpy(largs[i],s.c_str(),sizeof(char)*l);
-  }
-  *argv = largs;
-  if(sysArgs) {
-    free(sa);
-  }
-  return (int)args.size();
-}
-
-
 int main(int argc, char **argv) {
-  static_assert(sizeof(itype) == 4, "itype must be 4 bytes");
-  // Initialize Verilators variables
   bool enable_checker = true;
-  std::string sysArgs;
   std::string rv32_binary = "bbl.bin0.bin";
   uint64_t heartbeat = 1UL<<36, start_trace_at = ~0UL;
   uint64_t max_cycle = 0, max_icnt = 0, mem_lat = 2;
@@ -502,7 +349,6 @@ int main(int argc, char **argv) {
   ss->mem = mmap4G();
 
   
-  globals::sysArgc = buildArgcArgv(rv32_binary.c_str(),sysArgs.c_str(),&globals::sysArgv);
   initCapstone();
   std::unique_ptr<Vcore_l1d_l1i> tb(new Vcore_l1d_l1i);
   uint64_t last_match_pc = 0;
@@ -596,22 +442,6 @@ int main(int argc, char **argv) {
     
     if(tb->in_branch_recovery) {
       cycles_in_faulted++;
-    }
-
-    if(tb->rob_empty) {
-      tip_map[last_retired_pc]+= 1.0;
-    }
-    else if(!(tb->retire_valid or tb->retire_two_valid)) {
-      tip_map[tb->retire_pc]+= 1.0;
-    }
-    else {
-      assert(tb->retire_valid or tb->retire_two_valid);      
-      double total = static_cast<double>(tb->retire_valid) +
-	static_cast<double>(tb->retire_two_valid);
-      tip_map[tb->retire_pc]+= 1.0 / total;
-      if(tb->retire_two_valid) {
-	tip_map[tb->retire_two_pc]+= 1.0 / total;
-      }
     }
     
     if(tb->retire_valid) {
