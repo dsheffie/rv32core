@@ -2566,6 +2566,9 @@ module exec(clk,
 	t_mem_tail.spans_cacheline = 1'b0;
 	t_mem_tail.unaligned = 1'b0;
 	t_mem_tail.pc = mem_uq.pc;
+`ifdef ENABLE_CYCLE_ACCOUNTING
+	t_mem_tail.l1d_miss = 1'b0;
+`endif	        	
 	case(mem_uq.op)
 	  SB:
 	    begin
@@ -2810,6 +2813,7 @@ module exec(clk,
 	complete_bundle_2.rob_ptr <= int_uop2.rob_ptr;
 	complete_bundle_2.complete <= t_alu_valid2;
 	complete_bundle_2.faulted <= t_mispred_br2;
+	complete_bundle_2.mispred <= t_mispred_br2;
 	complete_bundle_2.restart_pc <= t_pc_2;
 	complete_bundle_2.cause <= 'd0;
 	complete_bundle_2.has_cause <= 1'b0;
@@ -2828,6 +2832,7 @@ module exec(clk,
 					  t_div_rob_ptr;
 	     complete_bundle_1.complete <= 1'b1;
 	     complete_bundle_1.faulted <= 1'b0;
+	     complete_bundle_1.mispred <= 1'b0;
 	     complete_bundle_1.restart_pc <= 'd0;
 	     complete_bundle_1.cause <= 'd0;
 	     complete_bundle_1.has_cause <= 1'b0;	     
@@ -2839,6 +2844,7 @@ module exec(clk,
 	     complete_bundle_1.rob_ptr <= int_uop.rob_ptr;
 	     complete_bundle_1.complete <= t_alu_valid;
 	     complete_bundle_1.faulted <= t_mispred_br || t_has_cause;
+	     complete_bundle_1.mispred <= t_mispred_br;
 	     complete_bundle_1.restart_pc <= t_pc;
 	     complete_bundle_1.cause <= t_cause;
 	     complete_bundle_1.has_cause <= t_has_cause;

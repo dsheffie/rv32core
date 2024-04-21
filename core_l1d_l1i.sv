@@ -42,6 +42,13 @@ module
 		   rob_empty,
 		       retire_pc,
 		       retire_two_pc,
+	    mispred,
+	    mispred_two,
+	    l1i_miss,
+	    l1i_miss_two,
+	    l1d_miss,
+	    l1d_miss_two,
+		   
 		       branch_pc,
 		       branch_pc_valid,		    
 		       branch_fault,
@@ -109,6 +116,13 @@ module
    output logic				  rob_empty;   
    output logic [(`M_WIDTH-1):0] 	  retire_pc;
    output logic [(`M_WIDTH-1):0] 	  retire_two_pc;
+   output logic				  mispred;
+   output logic				  mispred_two;
+   output logic				  l1i_miss;
+   output logic				  l1i_miss_two;
+   output logic				  l1d_miss;
+   output logic				  l1d_miss_two;   
+   
    input logic 				  monitor_ack;
    output logic 			  got_break;
    output logic 			  got_ud;
@@ -510,6 +524,12 @@ module
 	     .retire_two_valid(retire_two_valid),
 	     .retire_pc(retire_pc),
 	     .retire_two_pc(retire_two_pc),
+	     .mispred(mispred),
+	     .mispred_two(mispred_two),
+	     .l1i_miss(l1i_miss),
+	     .l1i_miss_two(l1i_miss_two),
+	     .l1d_miss(l1d_miss),
+	     .l1d_miss_two(l1d_miss_two),
 	     .rob_empty(rob_empty),
 	     .retired_call(retired_call),
 	     .retired_ret(retired_ret),

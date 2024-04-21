@@ -434,12 +434,19 @@ module l1d(clk,
    // 		      r_req2.is_store);
    // 	  end
    //   end
+
+   mem_req_t tt_req2;
+   always_comb
+     begin
+	tt_req2 = r_req2;
+	tt_req2.l1d_miss = !t_port2_hit_cache;
+     end
    
    always_ff@(posedge clk)
      begin
 	if(t_push_miss)
 	  begin
-	     r_mem_q[r_mq_tail_ptr[`LG_MRQ_ENTRIES-1:0] ] <= r_req2;
+	     r_mem_q[r_mq_tail_ptr[`LG_MRQ_ENTRIES-1:0] ] <= tt_req2;
 	     r_mq_addr[r_mq_tail_ptr[`LG_MRQ_ENTRIES-1:0]] <= r_req2.addr[IDX_STOP-1:IDX_START];
 	     r_mq_op[r_mq_tail_ptr[`LG_MRQ_ENTRIES-1:0]] <= r_req2.op;
 	     r_mq_is_load[r_mq_tail_ptr[`LG_MRQ_ENTRIES-1:0]] <= r_req2.is_load;
@@ -997,6 +1004,7 @@ module l1d(clk,
 	t_pop_mq = 1'b0;
 	n_core_mem_rsp_valid = 1'b0;
 	
+	n_core_mem_rsp.l1d_miss = 1'b0;
 	n_core_mem_rsp.data = r_req.addr;
 	n_core_mem_rsp.rob_ptr = r_req.rob_ptr;
 	n_core_mem_rsp.dst_ptr = r_req.dst_ptr;
@@ -1093,6 +1101,9 @@ module l1d(clk,
 			   end
 			 n_core_mem_rsp_valid = 1'b1;
 			 n_core_mem_rsp.has_cause = r_req2.spans_cacheline;
+`ifdef ENABLE_CYCLE_ACCOUNTING
+			 n_core_mem_rsp.l1d_miss = !t_port2_hit_cache;
+`endif
 		      end // if (r_req2.is_store)
 		    else if(t_port2_hit_cache && (!r_hit_busy_addr2 || (1'b0 & r_req2.op == MEM_LW && !r_hit_busy_word_addr2 && !r_any_unaligned )) )
 		      begin
@@ -1104,6 +1115,9 @@ module l1d(clk,
                          n_cache_hits = r_cache_hits + 'd1;
                          n_core_mem_rsp_valid = 1'b1;
 			 n_core_mem_rsp.has_cause = r_req2.spans_cacheline;
+`ifdef ENABLE_CYCLE_ACCOUNTING
+			 n_core_mem_rsp.l1d_miss = 1'b0;
+`endif
 		      end
 		    else
 		      begin
@@ -1129,6 +1143,7 @@ module l1d(clk,
 			      n_core_mem_rsp.data = t_rsp_data[`M_WIDTH-1:0];
 			      n_core_mem_rsp.dst_valid = t_rsp_dst_valid;
 			      n_core_mem_rsp_valid = 1'b1;
+			      n_core_mem_rsp.l1d_miss = r_req.l1d_miss;
 			      n_core_mem_rsp.has_cause = r_req.spans_cacheline;
 
 			      if(r_did_reload)
@@ -1340,6 +1355,7 @@ module l1d(clk,
 			 n_core_mem_rsp.has_cause = r_req.spans_cacheline;
 			 n_core_mem_rsp_valid = 1'b1;
 			 n_core_mem_rsp.dst_valid = r_req.dst_valid & n_core_mem_rsp_valid;
+			 n_core_mem_rsp.l1d_miss = 1'b1;
 			 //
 			 //$display("early ack at cycle %d for load with rob ptr %d, data %x, dst valid %b, addr %x, r_lock_cache = %b",
 			 //r_cycle, r_req.rob_ptr, n_core_mem_rsp.data , n_core_mem_rsp.dst_valid, r_req.addr, r_lock_cache );

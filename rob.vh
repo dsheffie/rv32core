@@ -46,6 +46,8 @@ typedef struct packed {
    logic [63:0] 	    fetch_cycle;
    logic [63:0] 	    alloc_cycle;
    logic [63:0] 	    complete_cycle;
+   logic		    l1i_miss;
+   logic		    l1d_miss;
 `endif
    
 } rob_entry_t;
@@ -59,6 +61,7 @@ typedef struct packed {
    logic [3:0]		       cause;
    logic		       has_cause;
    logic [`M_WIDTH-1:0]        data;
+   logic		       mispred;   
 } complete_t;
 
 typedef struct packed {
@@ -69,6 +72,7 @@ typedef struct packed {
    logic [(`LG_PHT_SZ-1):0] pht_idx;
 `ifdef ENABLE_CYCLE_ACCOUNTING
    logic [63:0] 	    fetch_cycle;
+   logic		    l1i_miss;
 `endif
 } insn_fetch_t;
 
@@ -84,6 +88,9 @@ typedef struct packed {
    logic 		       dst_valid;
    logic [`M_WIDTH-1:0]        data;
    logic [`M_WIDTH-1:0]        pc;
+`ifdef ENABLE_CYCLE_ACCOUNTING
+   logic		       l1d_miss;
+`endif	           
 } mem_req_t;
 
 typedef struct packed {
@@ -104,6 +111,9 @@ typedef struct packed {
    logic [3:0]		       cause;
    logic		       has_cause;   
    logic [`M_WIDTH-1:0]        pc;
+`ifdef ENABLE_CYCLE_ACCOUNTING
+   logic		       l1d_miss;
+`endif	        
 } mem_rsp_t;
 
 typedef struct packed {

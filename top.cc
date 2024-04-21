@@ -288,7 +288,9 @@ void record_retirement(long long pc,
 		       int retire_reg_ptr,
 		       long long retire_reg_data,
 		       int faulted ,
-		       int br_mispredict) {
+		       int br_mispredict,
+		       int missed_l1i,
+		       int missed_l1d) {
 
   uint32_t insn = get_insn(pc, s);
   uint64_t delta = retire_cycle - last_retire_cycle;
@@ -312,6 +314,12 @@ void record_retirement(long long pc,
     //<< " cycles from alloc to retire and "
     //<< tt << " cycles from fetch to retire\n";
     mispred_lat_map[complete_cycle-alloc_cycle]++;
+  }
+
+  if(missed_l1d) {
+    std::cout << std::hex << pc << " missed the l1d : "
+	      << getAsmString(insn, pc)
+	      << "\n" << std::dec;
   }
   
   retire_map[delta]++;

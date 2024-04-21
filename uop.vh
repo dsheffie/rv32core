@@ -229,6 +229,7 @@ typedef struct packed {
 `endif
 `ifdef ENABLE_CYCLE_ACCOUNTING
    logic [63:0] 	    fetch_cycle;
+   logic		    l1i_miss;
 `endif   
 } uop_t;
 

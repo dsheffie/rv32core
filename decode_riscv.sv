@@ -86,6 +86,7 @@ module decode_riscv(
 		    insn_pred_target,
 `ifdef ENABLE_CYCLE_ACCOUNTING   		     
 		    fetch_cycle,
+		    l1i_miss,
 `endif
 		    syscall_emu,
 		    uop);
@@ -98,6 +99,7 @@ module decode_riscv(
    input logic [`M_WIDTH-1:0] 	insn_pred_target;
 `ifdef ENABLE_CYCLE_ACCOUNTING   
    input logic [63:0] 		fetch_cycle;
+   input logic			l1i_miss;
 `endif
    input logic			syscall_emu;
    output 	uop_t uop;
@@ -178,6 +180,7 @@ module decode_riscv(
 	uop.is_store = 1'b0;
 `ifdef ENABLE_CYCLE_ACCOUNTING
 	uop.fetch_cycle = fetch_cycle;
+	uop.l1i_miss = l1i_miss;
 `endif
 
 	case(opcode)

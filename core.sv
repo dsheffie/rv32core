@@ -26,7 +26,9 @@ import "DPI-C" function void record_retirement(input longint pc,
 					       input int     retire_ptr,
 					       input longint retire_data,
 					       input int     fault,
-					       input int     br_mispredict);
+					       input int     br_mispredict,
+					       input int     l1i_miss,
+					       input int     l1d_miss);
 
 import "DPI-C" function void record_restart(input int restart_cycles);
 import "DPI-C" function void record_ds_restart(input int delay_cycles);
@@ -102,6 +104,12 @@ module core(clk,
 	    retire_two_valid,
 	    retire_pc,
 	    retire_two_pc,
+	    mispred,
+	    mispred_two,
+	    l1i_miss,
+	    l1i_miss_two,
+	    l1d_miss,
+	    l1d_miss_two,
 	    rob_empty,
 	    retired_call,
 	    retired_ret,
@@ -200,6 +208,15 @@ module core(clk,
    
    output logic [(`M_WIDTH-1):0] 	  retire_pc;
    output logic [(`M_WIDTH-1):0] 	  retire_two_pc;
+
+   output logic				  mispred;
+   output logic				  mispred_two;
+   output logic				  l1i_miss;
+   output logic				  l1i_miss_two;
+   output logic				  l1d_miss;
+   output logic				  l1d_miss_two;   
+   
+   
    output logic 			  retired_call;
    output logic 			  retired_ret;
 
@@ -253,7 +270,11 @@ module core(clk,
    
    logic [N_ROB_ENTRIES-1:0] 		  r_rob_complete;
    logic [N_ROB_ENTRIES-1:0] 		  r_rob_sd_complete;
-
+`ifdef ENABLE_CYCLE_ACCOUNTING
+   logic [N_ROB_ENTRIES-1:0]		  r_rob_br_mispred;
+   logic [N_ROB_ENTRIES-1:0]		  r_rob_l1d_miss;
+`endif
+   
    logic 				  t_core_store_data_ptr_valid;
    logic [`LG_ROB_ENTRIES-1:0] 		  t_core_store_data_ptr;
  		  
@@ -604,6 +625,12 @@ module core(clk,
 	     iq_none_valid <= 1'b0;
    	     retire_pc <= 'd0;
 	     retire_two_pc <= 'd0;
+	     mispred <= 1'b0;
+	     mispred_two <= 1'b0;
+	     l1i_miss <= 1'b0;
+	     l1i_miss_two <= 1'b0;
+	     l1d_miss <= 1'b0;
+	     l1d_miss_two <= 1'b0;
 	     retired_call <= 1'b0;
 	     retired_ret <= 1'b0;
 	     retired_rob_ptr_valid <= 1'b0;
@@ -630,6 +657,13 @@ module core(clk,
 	     iq_none_valid <= t_dq_empty;
    	     retire_pc <= t_rob_head.pc;
 	     retire_two_pc <= t_rob_next_head.pc;
+	     mispred <= r_rob_br_mispred[r_rob_head_ptr[`LG_ROB_ENTRIES-1:0]];
+	     mispred_two <= 1'b0;
+	     l1i_miss <= t_rob_head.l1i_miss;
+	     l1i_miss_two <= t_rob_next_head.l1i_miss;
+	     l1d_miss <= r_rob_l1d_miss[r_rob_head_ptr[`LG_ROB_ENTRIES-1:0]];
+	     l1d_miss_two <= r_rob_l1d_miss[r_rob_next_head_ptr[`LG_ROB_ENTRIES-1:0]];
+
 	     retired_ret <= t_rob_head.is_ret && t_retire;
 	     retired_call <= t_rob_head.is_call && t_retire;
 
@@ -667,7 +701,9 @@ module core(clk,
 			       {27'd0, t_rob_head.ldst},
 			       {{(64-`M_WIDTH){1'b0}},t_rob_head.data},
 			       t_rob_head.faulted ? 32'd1 : 32'd0,
-			       t_rob_head.faulted ? 32'd1 : 32'd0			       
+			       r_rob_br_mispred[r_rob_head_ptr[`LG_ROB_ENTRIES-1:0]] ? 32'd1 : 32'd0, 
+			       t_rob_head.l1i_miss ? 32'd1 : 32'd0,
+			       r_rob_l1d_miss[r_rob_head_ptr[`LG_ROB_ENTRIES-1:0]] ? 32'd1 : 32'd0
 			       );
    	  end
    	if(t_retire_two)
@@ -682,7 +718,10 @@ module core(clk,
 			       {27'd0, t_rob_next_head.ldst},
 			       {{(64-`M_WIDTH){1'b0}},t_rob_next_head.data},			       
 			       t_rob_next_head.faulted ? 32'd1 : 32'd0,
-			       32'd0);	     
+			       32'd0,
+			       t_rob_next_head.l1i_miss ? 32'd1 : 32'd0,
+			       r_rob_l1d_miss[r_rob_next_head_ptr[`LG_ROB_ENTRIES-1:0]] ? 32'd1 : 32'd0 
+			       );	     
    	  end // if (t_retire_two)
 	if(r_state == RAT && n_state == ACTIVE)
 	  begin
@@ -1394,6 +1433,8 @@ module core(clk,
 	     t_rob_tail.fetch_cycle = t_alloc_uop.fetch_cycle;
 	     t_rob_tail.alloc_cycle = r_cycle;
 	     t_rob_tail.complete_cycle = 'd0;
+	     t_rob_tail.l1i_miss = t_alloc_uop.l1i_miss;
+	     t_rob_tail.l1d_miss = 1'b0;
 `endif	     
 	     if(t_uop.dst_valid)
 	       begin
@@ -1432,6 +1473,8 @@ module core(clk,
 	     t_rob_next_tail.fetch_cycle = t_alloc_uop2.fetch_cycle;
 	     t_rob_next_tail.alloc_cycle = r_cycle;
 	     t_rob_next_tail.complete_cycle = 'd0;
+	     t_rob_next_tail.l1i_miss = t_alloc_uop2.l1i_miss;
+	     t_rob_next_tail.l1d_miss = 1'b0;
 `endif
 
 	     if(t_uop2.dst_valid)
@@ -1568,6 +1611,59 @@ module core(clk,
 	  end
      end // always_ff@ (posedge clk)
 
+
+`ifdef ENABLE_CYCLE_ACCOUNTING
+   always_ff@(posedge clk)
+     begin
+	if(reset)
+	  begin
+	     r_rob_br_mispred <= 'd0;
+	  end
+	else
+	  begin
+	     if(t_alloc)
+	       begin
+		  r_rob_br_mispred[r_rob_tail_ptr[`LG_ROB_ENTRIES-1:0]] <= 1'b0;
+	       end
+	     if(t_alloc_two)
+	       begin
+		  r_rob_br_mispred[r_rob_next_tail_ptr[`LG_ROB_ENTRIES-1:0]] <= 1'b0;
+	       end
+	     if(t_complete_valid_1)
+	       begin
+		  r_rob_br_mispred[t_complete_bundle_1.rob_ptr[`LG_ROB_ENTRIES-1:0]] <= t_complete_bundle_1.mispred;
+	       end
+	     if(t_complete_valid_2)
+	       begin
+		  r_rob_br_mispred[t_complete_bundle_2.rob_ptr[`LG_ROB_ENTRIES-1:0]] <= t_complete_bundle_2.mispred;
+	       end
+	  end
+     end // always_ff@ (posedge clk)
+   always_ff@(posedge clk)
+     begin
+	if(reset)
+	  begin
+	     r_rob_l1d_miss <= 'd0;
+	  end
+	else 
+	  begin
+	     if(t_alloc)
+	       begin
+		  r_rob_l1d_miss[r_rob_tail_ptr[`LG_ROB_ENTRIES-1:0]] <= 1'b0;
+	       end
+	     if(t_alloc_two)
+	       begin
+		  r_rob_l1d_miss[r_rob_next_tail_ptr[`LG_ROB_ENTRIES-1:0]] <= 1'b0;
+	       end	     
+	     if(core_mem_rsp_valid)
+	       begin
+		  r_rob_l1d_miss[core_mem_rsp.rob_ptr] <= core_mem_rsp.l1d_miss;
+	       end
+	  end
+     end
+   
+`endif //  `ifdef ENABLE_CYCLE_ACCOUNTING
+   
    always_ff@(posedge clk)
      begin
 	if(reset || t_clr_rob)
@@ -1888,6 +1984,7 @@ module core(clk,
       .insn_pred_target(insn.pred_target),
 `ifdef ENABLE_CYCLE_ACCOUNTING
       .fetch_cycle(insn.fetch_cycle),
+      .l1i_miss(insn.l1i_miss),
 `endif
       .syscall_emu(syscall_emu),		      
       .uop(t_dec_uop)
@@ -1903,6 +2000,7 @@ module core(clk,
 	.insn_pred_target(insn_two.pred_target),
 `ifdef ENABLE_CYCLE_ACCOUNTING
 	.fetch_cycle(insn_two.fetch_cycle),
+	.l1i_miss(insn_two.l1i_miss),
 `endif
 	.syscall_emu(syscall_emu),	
 	.uop(t_dec_uop2)

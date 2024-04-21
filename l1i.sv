@@ -304,6 +304,7 @@ endfunction
    logic 		  t_miss, t_hit;
    logic 		  t_push_insn, t_push_insn2,
 			  t_push_insn3, t_push_insn4;
+   logic		  r_missed, n_missed;
    
    logic 		  t_clear_fq;
    logic 		  r_flush_req, n_flush_req;
@@ -487,6 +488,8 @@ endfunction
      begin
 	n_pc = r_pc;
 	n_miss_pc = r_miss_pc;
+	n_missed = r_missed;
+	
 	n_cache_pc = 'd0;
 	n_state = r_state;
 	n_restart_ack = 1'b0;
@@ -626,13 +629,15 @@ endfunction
 		 begin
 		    //$display("MISSED in the icache at cycle %d", r_cycle);
 		    n_state = INJECT_RELOAD;
+		    n_missed = 1'b1;
 		    n_mem_req_addr = {r_cache_pc[`M_WIDTH-1:`LG_L1D_CL_LEN], {`LG_L1D_CL_LEN{1'b0}}};
 		    n_mem_req_valid = 1'b1;
 		    n_miss_pc = r_cache_pc;
 		    n_pc = r_pc;
 		 end
 	       else if(t_hit && !fq_full)
-		 begin		    
+		 begin	
+		    n_missed = 1'b0;
 		    t_update_spec_hist = (t_pd != 4'd0);
 		    //if(t_pd == 4'd1)
 		    //begin
@@ -827,6 +832,7 @@ endfunction
 	t_insn.pht_idx = r_pht_idx;
 `ifdef	ENABLE_CYCLE_ACCOUNTING
 	t_insn.fetch_cycle = r_cycle;
+	t_insn.l1i_miss = r_missed;
 `endif
 	t_insn2.insn_bytes = t_insn_data2;
 	t_insn2.pc = r_cache_pc + 'd4;
@@ -835,6 +841,7 @@ endfunction
 	t_insn2.pht_idx = 'd0;
 `ifdef	ENABLE_CYCLE_ACCOUNTING
 	t_insn2.fetch_cycle = r_cycle;
+	t_insn2.l1i_miss = r_missed;
 `endif
 	t_insn3.insn_bytes = t_insn_data3;
 	t_insn3.pc = r_cache_pc + 'd8;
@@ -843,6 +850,7 @@ endfunction
 	t_insn3.pht_idx = 'd0;
 `ifdef	ENABLE_CYCLE_ACCOUNTING
 	t_insn3.fetch_cycle = r_cycle;
+	t_insn3.l1i_miss = r_missed;
 `endif
 	t_insn4.insn_bytes = t_insn_data4;
 	t_insn4.pc = r_cache_pc + 'd12;
@@ -851,6 +859,7 @@ endfunction
 	t_insn4.pht_idx = 'd0;
 `ifdef	ENABLE_CYCLE_ACCOUNTING
 	t_insn4.fetch_cycle = r_cycle;
+	t_insn4.l1i_miss = r_missed;
 `endif
      end // always_comb
    
@@ -1104,6 +1113,7 @@ endfunction
 	     r_state <= INITIALIZE;
 	     r_init_pht_idx <= 'd0;
 	     r_pc <= 'd0;
+	     r_missed <= 1'b0;
 	     r_miss_pc <= 'd0;
 	     r_cache_pc <= 'd0;
 	     r_restart_ack <= 1'b0;
@@ -1134,6 +1144,7 @@ endfunction
 	     r_state <= n_state;
 	     r_init_pht_idx <= n_init_pht_idx;
 	     r_pc <= n_pc;
+	     r_missed <= n_missed;
 	     r_miss_pc <= n_miss_pc;
 	     r_cache_pc <= n_cache_pc;
 	     r_restart_ack <= n_restart_ack;
