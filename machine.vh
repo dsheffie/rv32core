@@ -6,6 +6,8 @@
  //`define PERFECT_L1D
 `endif
 
+`define SECOND_EXEC_PORT 1
+
 `define FPGA 1
 
 `define LG_M_WIDTH 6
